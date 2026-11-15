@@ -1,0 +1,32 @@
+name: Update release manifest
+on:
+  release:
+    types: [published]
+permissions:
+  contents: write
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Record latest release
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+          const release = event.release;
+          const assets = (release.assets || []).filter(asset => asset.name.endsWith('.apk'))
+            .map(asset => ({ name: asset.name, browser_download_url: asset.browser_download_url }));
+          writeFileSync('release.json', JSON.stringify({ tag_name: release.tag_name, html_url: release.html_url, assets }, null, 2) + '\n');
+          JS
+      - name: Push manifest
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add release.json
+          git diff --cached --quiet || (git commit -m 'Update release manifest' && git push origin main)

@@ -23,3 +23,15 @@ test('GitHub release prefers a public APK asset', async () => {
   assert.equal(requested, 'https://api.github.com/repos/yzxcxy/Surge/releases/latest');
   assert.match(release.apk, /surge\.apk$/);
 });
+
+test('Surge checks its release manifest when GitHub API is rate-limited', async () => {
+  const requests = [];
+  const release = await latestRelease('yzxcxy/Surge', async url => {
+    requests.push(url);
+    return requests.length === 1 ? { ok: false, status: 403 } : { ok: true, json: async () => ({
+      tag_name: 'v1.1.0', html_url: 'https://github.com/yzxcxy/Surge/releases/tag/v1.1.0', assets: []
+    }) };
+  });
+  assert.equal(requests[1], 'https://raw.githubusercontent.com/yzxcxy/Surge/main/release.json');
+  assert.equal(release.version, 'v1.1.0');
+});

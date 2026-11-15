@@ -1,0 +1,6 @@
+{
+  "appId": "org.surge.notes",
+  "appName": "Surge",
+  "webDir": "web",
+  "server": { "androidScheme": "https" }
+}

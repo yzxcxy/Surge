@@ -1,0 +1,14 @@
+node_modules/
+obsidian/node_modules/
+obsidian/main.js
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+android/app/src/main/assets/public/
+dist/
+data/
+.env
+.DS_Store
+base.apk
+docs/xiaomi-*-reference.png

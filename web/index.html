@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f7f7"><meta name="description" content="Surge 笔记">
+  <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <title>Surge 笔记</title>
+</head>
+<body>
+  <div id="setup" class="setup-screen" hidden>
+    <div class="setup-card">
+      <h1>打开旧笔记</h1><p>输入一次旧口令，完成迁移</p>
+      <label>旧加密口令<input id="passphrase" type="password" autocomplete="current-password"></label>
+      <button id="connect" class="primary">迁移并打开</button>
+      <p id="setup-error" class="error"></p>
+    </div>
+  </div>
+  <div id="app" class="app" hidden>
+    <aside class="sidebar">
+      <div class="logo"><b>Surge</b></div>
+      <div class="side-section">笔记</div>
+      <button class="nav active" data-view="all">▤ <span>全部笔记</span></button>
+      <div class="side-section folder-head">文件夹 <button id="add-folder" title="新建文件夹">＋</button></div>
+      <div id="folders"></div>
+      <div class="sidebar-bottom"><span id="sync-dot"></span><span id="sync-label">离线可用</span><button id="settings" title="连接设置">⚙</button></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><span id="breadcrumbs">笔记</span><div class="desktop-actions"><button id="sync-now" title="立即同步" aria-label="立即同步">↻</button></div><div class="mobile-actions"><button id="mobile-folders" title="分类" aria-label="分类" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5M3 9.5h18v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button><button id="mobile-settings" title="设置" aria-label="设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 8.5 5v10L12 22l-8.5-5V7z"/><circle cx="12" cy="12" r="3"/></svg></button></div></header>
+      <div class="content">
+        <div class="hero"><div class="hero-heading"><button id="trash-back" aria-label="返回笔记" hidden>←</button><div><h1 id="view-title">笔记</h1><p id="count">0 条笔记</p></div></div><button id="new-note" class="primary">新建笔记</button></div>
+        <div class="toolbar"><label class="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg><input id="search" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="搜索笔记" aria-label="搜索笔记"></label><button id="layout-toggle" title="切换列表和宫格" aria-label="切换列表和宫格" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button></div>
+        <div class="category-row"><span>分类</span><div id="category-strip" class="category-strip"></div><button id="manage-categories" aria-label="新建分类">＋</button></div>
+        <div id="notes" class="note-grid"></div>
+        <div id="todos" class="todo-list" hidden></div>
+        <div id="empty" class="empty" hidden>还没有笔记</div>
+      </div>
+      <button id="fab" aria-label="新建笔记">＋</button>
+      <nav id="tabbar" class="tabbar" aria-label="内容类型"><button data-tab="notes" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>笔记</span></button><button data-tab="todos"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 9 1.5 1.5L12 8M14 9h3M8 16h9"/></svg><span>待办</span></button></nav>
+      <nav id="mobile-nav" class="mobile-nav" aria-label="笔记分类" hidden>
+        <button data-mobile-view="all">全部笔记</button>
+        <select id="mobile-folder" aria-label="选择文件夹"><option value="">文件夹</option></select>
+      </nav>
+    </main>
+    <section id="editor" class="editor" hidden>
+      <div class="editor-top"><button id="back" title="返回" aria-label="返回"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 4-8 8 8 8M4 12h17"/></svg></button><span id="save-state" class="sr-only" aria-live="polite">已保存在本机</span><div class="editor-top-actions"><button id="more" title="更多操作" aria-label="更多操作"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button></div></div>
+      <div class="editor-meta"><div class="folder-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5M3 9.5h18v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><select id="note-folder" aria-label="文件夹"></select></div><input id="note-title" placeholder="标题" aria-label="标题"><div id="edit-date"></div></div>
+      <div id="note-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="内容" data-placeholder="开始记录…"></div>
+      <div id="editor-toolbar" class="editor-toolbar" aria-label="插入内容">
+        <button data-insert="text" aria-label="文字" title="文字"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M12 5v14M8 19h8"/></svg></button>
+        <button data-insert="task" aria-label="待办" title="待办"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7.5 12 3 3 6-6"/></svg></button>
+        <button data-insert="table" aria-label="表格" title="表格"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M10 10v10"/></svg></button>
+        <button data-insert="image" aria-label="图片" title="图片"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="17" rx="2.5"/><circle cx="8" cy="9" r="1.5"/><path d="m3 18 6-6 3.5 3.5 3-3L21 18"/></svg></button>
+        <button data-insert="camera" aria-label="拍照" title="拍照"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l2-2h6l2 2h4v13H3z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+        <button data-insert="audio" aria-label="录音" title="录音"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 10v4m4-7v10m4-14v18m4-15v12m4-9v6m4-4v2"/></svg></button>
+        <button data-insert="drawing" aria-label="绘图" title="绘图"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17c3-7 6-11 8-10 2 1-4 10-2 11 2 1 6-5 8-4 2 1-1 6 4 7"/></svg></button>
+        <button data-insert="mindmap" aria-label="思维导图" title="思维导图"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="9" width="6" height="6" rx="1"/><rect x="16" y="3" width="6" height="6" rx="1"/><rect x="16" y="15" width="6" height="6" rx="1"/><path d="M8 12h4m0 0V6h4m-4 6v6h4"/></svg></button>
+        <button data-insert="file" aria-label="附件" title="附件"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 13 7-7a3 3 0 0 1 4 4L9 20a5 5 0 0 1-7-7l9-9"/></svg></button>
+        <button data-insert="formula" aria-label="公式" title="公式"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20 10 4m-7 6h10m2 3 6 7m0-7-6 7"/></svg></button>
+        <button data-insert="emoji" aria-label="表情" title="表情"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 15c2 3 6 3 8 0"/><circle cx="8.5" cy="9" r=".7"/><circle cx="15.5" cy="9" r=".7"/></svg></button>
+        <button data-insert="password" aria-label="密码" title="密码"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/></svg></button>
+      </div>
+      <div id="more-menu" class="more-menu" hidden><button id="history-note">历史版本</button><button id="pin-note">置顶</button><button id="delete-note">移至回收站</button><button id="restore-note">恢复笔记</button></div>
+    </section>
+    <section id="history" class="history-panel" hidden><header><button id="history-close" aria-label="返回编辑">←</button><h2>历史版本</h2></header><div id="history-list"></div></section>
+    <section id="settings-panel" class="settings-panel" hidden>
+      <header><button id="settings-back" aria-label="返回笔记">←</button><h2>设置</h2></header>
+      <div class="settings-content">
+        <div class="settings-group"><h3>外观</h3><label class="setting-row"><span>毛玻璃效果</span><input id="glass-toggle" type="checkbox"></label></div>
+        <div class="settings-group"><button id="open-trash" class="settings-link"><span>回收站</span><span aria-hidden="true">›</span></button></div>
+        <div class="settings-group"><h3>应用更新</h3><div class="setting-row"><span>当前版本</span><span id="current-version"></span></div><label class="update-repo-label">GitHub 仓库<input id="update-repo" type="text" placeholder="owner/repo" autocomplete="off" spellcheck="false"></label><button id="check-update" class="settings-link"><span>检查更新</span><span aria-hidden="true">›</span></button><p id="update-status" class="update-status" role="status"></p><button id="open-update" class="primary" hidden>打开下载页</button></div>
+        <details id="sync-details" class="settings-group"><summary><strong>同步</strong><span id="settings-sync-state">未开启</span></summary><div class="sync-fields">
+          <label>服务器地址<input id="server" type="url" placeholder="https://notes.example.com" autocomplete="url"></label>
+          <label>访问令牌<input id="token" type="password" autocomplete="off"></label>
+          <label>同步口令<input id="sync-passphrase" type="password" autocomplete="new-password"></label>
+          <button id="enable-sync" class="primary">连接并同步</button>
+          <button id="disable-sync" class="text-button" hidden>关闭同步</button>
+          <p id="settings-error" class="error"></p>
+        </div></details>
+      </div>
+    </section>
+    <dialog id="folder-dialog" class="entry-dialog"><form><h2 id="folder-dialog-title">新建分类</h2><input id="folder-name" maxlength="80" placeholder="分类名称" aria-label="分类名称"><p id="folder-error" class="error"></p><div class="dialog-actions"><button id="folder-cancel" type="button">取消</button><button id="folder-save" type="submit">保存</button></div></form><div id="folder-manage-list"></div></dialog>
+    <input id="pick-image" type="file" accept="image/*" hidden><input id="pick-camera" type="file" accept="image/*" capture="environment" hidden><input id="pick-file" type="file" hidden><input id="pick-audio" type="file" accept="audio/*" hidden>
+    <dialog id="record-dialog" class="entry-dialog"><h2>录音</h2><p id="record-status">点击开始录音</p><div class="dialog-actions"><button id="record-cancel">取消</button><button id="record-start">开始</button><button id="record-stop" hidden>结束并保存</button><button id="record-pick">选择音频</button></div></dialog>
+    <dialog id="drawing-dialog" class="drawing-dialog" aria-label="绘图编辑器">
+      <header class="drawing-header"><button id="drawing-cancel" class="drawing-icon" aria-label="返回"><svg viewBox="0 0 24 24"><path d="m12 4-8 8 8 8M4 12h17"/></svg></button><div class="drawing-header-actions"><button id="drawing-undo" class="drawing-icon" aria-label="撤销" disabled><svg viewBox="0 0 24 24"><path d="m9 8-5 5 5 5M4 13h10a6 6 0 0 1 6 6"/></svg></button><button id="drawing-redo" class="drawing-icon" aria-label="重做" disabled><svg viewBox="0 0 24 24"><path d="m15 8 5 5-5 5m5-5H10a6 6 0 0 0-6 6"/></svg></button><button id="drawing-save" class="drawing-icon" aria-label="保存绘图"><svg viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></svg></button></div></header>
+      <div class="drawing-canvas-shell"><canvas id="drawing-canvas" aria-label="自由绘图画布"></canvas></div>
+      <div id="drawing-color-popover" class="drawing-popover drawing-palette" hidden><button data-drawing-color="#222222" aria-label="黑色" style="--swatch:#222222"></button><button data-drawing-color="#777777" aria-label="灰色" style="--swatch:#777777"></button><button data-drawing-color="#f05c52" aria-label="红色" style="--swatch:#f05c52"></button><button data-drawing-color="#ff9d36" aria-label="橙色" style="--swatch:#ff9d36"></button><button data-drawing-color="#ffbf18" aria-label="黄色" style="--swatch:#ffbf18"></button><button data-drawing-color="#5daf74" aria-label="绿色" style="--swatch:#5daf74"></button><button data-drawing-color="#4d8fd4" aria-label="蓝色" style="--swatch:#4d8fd4"></button><button data-drawing-color="#9369c9" aria-label="紫色" style="--swatch:#9369c9"></button><input id="drawing-color" type="color" value="#222222" aria-label="更多颜色"></div>
+      <div id="drawing-size-popover" class="drawing-popover drawing-size" hidden><span class="drawing-size-preview" aria-hidden="true"></span><input id="drawing-size" type="range" min="1" max="32" value="4" aria-label="画笔粗细"><output id="drawing-size-value">4</output></div>
+      <nav class="drawing-tools" aria-label="绘图工具">
+        <button id="drawing-color-button" class="drawing-tool-color" aria-label="颜色" aria-expanded="false"><i id="drawing-color-indicator"></i></button>
+        <button id="drawing-pencil" class="drawing-brush active" data-drawing-tool="pencil" aria-label="铅笔" aria-pressed="true"><svg viewBox="0 0 64 116" aria-hidden="true"><path d="M29 13 27 102l5 12 5-12-2-89Z" fill="#f4f4f4" stroke="#c9c9c9"/><path d="M29 13c0-4 1-8 3-12 2 4 3 8 3 12Z" fill="#242424"/><path d="M31 14v88" stroke="#d4d4d4" stroke-width="2"/><path d="m27 102 5 12 5-12Z" fill="#c9c9c9"/></svg></button>
+        <button id="drawing-brush" class="drawing-brush" data-drawing-tool="brush" aria-label="毛笔" aria-pressed="false"><svg viewBox="0 0 64 116" aria-hidden="true"><path d="M31 0c-7 16-11 29-8 35 3 6 15 6 18 0 3-6-2-19-10-35Z" fill="#62b6e9"/><path d="M23 35h18l-4 13H27Z" fill="#d5dce2"/><path d="M27 48h10l2 63H25Z" fill="#f7f7f7" stroke="#d7d7d7"/><circle cx="32" cy="76" r="2" fill="#62b6e9"/></svg></button>
+        <button id="drawing-marker" class="drawing-brush" data-drawing-tool="marker" aria-label="荧光笔" aria-pressed="false"><svg viewBox="0 0 64 116" aria-hidden="true"><path d="M21 19 43 12v22l-22 5Z" fill="#ffac46"/><path d="M22 39h20v12H22Z" fill="#e8e8e8"/><path d="M24 51h16l3 60H21Z" fill="#f8f8f8" stroke="#d9d9d9"/><circle cx="32" cy="87" r="2" fill="#ffac46"/></svg></button>
+        <button id="drawing-pen" class="drawing-brush" data-drawing-tool="pen" aria-label="钢笔" aria-pressed="false"><svg viewBox="0 0 64 116" aria-hidden="true"><path d="M32 0 23 29l9 20 9-20Z" fill="#d8dde1" stroke="#aeb5b8"/><path d="M32 5v38" stroke="#76b86a" stroke-width="2"/><path d="M25 48h14l2 63H23Z" fill="#fafafa" stroke="#d5d5d5"/><path d="M26 74h12" stroke="#76b86a" stroke-width="3"/></svg></button>
+        <button id="drawing-eraser" class="drawing-brush" data-drawing-tool="eraser" aria-label="橡皮" aria-pressed="false"><svg viewBox="0 0 64 116" aria-hidden="true"><rect x="14" y="20" width="36" height="85" rx="12" fill="#f4f4f4" stroke="#dcdcdc"/><path d="M18 42h28" stroke="#e3e3e3" stroke-width="3"/><path d="m25 67 5 5-4 6m13-11-5 5 4 6" fill="none" stroke="#bbb" stroke-width="2"/></svg></button>
+        <button id="drawing-size-button" class="drawing-brush drawing-utility" aria-label="粗细" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 19h16" stroke-width="1.4"/><path d="M4 12h16" stroke-width="2.6"/><path d="M4 19h16" stroke-width="4"/></svg></button>
+        <button id="drawing-clear" class="drawing-brush drawing-utility" aria-label="清空画布"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v6m4-6v6"/></svg></button>
+      </nav>
+    </dialog>
+    <dialog id="mindmap-dialog" class="entry-dialog"><h2>思维导图</h2><textarea id="mindmap-outline" rows="8" placeholder="主题&#10;  分支一&#10;  分支二"></textarea><div class="dialog-actions"><button id="mindmap-cancel">取消</button><button id="mindmap-save">插入导图</button></div></dialog>
+    <dialog id="formula-dialog" class="entry-dialog"><h2>公式</h2><textarea id="formula-source" rows="3" spellcheck="false" placeholder="\\frac{a}{b}" aria-label="LaTeX 公式"></textarea><div class="dialog-actions"><button id="formula-cancel">取消</button><button id="formula-save">完成</button></div></dialog>
+    <dialog id="emoji-dialog" class="entry-dialog"><h2>表情</h2><div id="emoji-grid" class="emoji-grid"></div><div class="dialog-actions"><button id="emoji-close">关闭</button></div></dialog>
+    <dialog id="password-dialog" class="entry-dialog"><h2>密码条目</h2><label>名称<input id="password-name" autocomplete="off"></label><label>账号<input id="password-username" autocomplete="off"></label><label>密码<input id="password-secret" type="password" autocomplete="new-password"></label><div class="dialog-actions"><button id="password-cancel">取消</button><button id="password-save">插入</button></div></dialog>
+    <div id="toast" role="status" hidden></div>
+  </div>
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>

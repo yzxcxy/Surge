@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Surge</string>
+    <string name="title_activity_main">Surge</string>
+    <string name="package_name">org.surge.notes</string>
+    <string name="custom_url_scheme">org.surge.notes</string>
+</resources>

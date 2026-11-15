@@ -1,0 +1,14 @@
+services:
+  surge:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      SURGE_TOKEN: "${SURGE_TOKEN:?Set SURGE_TOKEN in .env}"
+      SURGE_DATA_DIR: /data
+      PORT: 8787
+    volumes:
+      - surge_data:/data
+    restart: unless-stopped
+volumes:
+  surge_data:

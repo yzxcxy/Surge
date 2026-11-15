@@ -1,0 +1,8 @@
+node_modules
+android
+obsidian/node_modules
+obsidian/main.js
+dist
+docs/android-emulator*.png
+.git
+data

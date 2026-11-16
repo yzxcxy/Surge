@@ -431,6 +431,7 @@ function updateEditorViewport() {
 window.surgeSetVisibleHeight = height => {
   nativeVisibleHeight = Number.isFinite(height) && height > 0 ? height : Infinity;
   updateEditorViewport();
+  updateMindmapViewport();
 };
 async function sync() {
   if (syncing || !server || !token || !key) return;
@@ -823,11 +824,26 @@ function outlineToSvg(items) {
   const boxes = nodes.map(node => `<rect x="${25 + node.level * 170}" y="${node.y}" width="148" height="35" rx="11" fill="${node.level ? '#f8f8f8' : '#fff8df'}" stroke="${node.level ? '#e6e6e6' : '#f3d278'}"/><text x="${36 + node.level * 170}" y="${node.y + 23}" font-family="sans-serif" font-size="14" fill="#252525">${escape(node.label)}</text>`).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="white"/>${edges}${boxes}</svg>`;
 }
-let mindmapItems = [], mindmapTarget = null, mindmapActive = 0;
+let mindmapItems = [], mindmapTarget = null, mindmapActive = 0, mindmapMode = 'outline';
+const mapViewIcon = '<svg viewBox="0 0 24 24"><circle cx="4" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M6 12h7V5h4m-4 7v7h4"/></svg>';
+const outlineViewIcon = '<svg viewBox="0 0 24 24"><path d="M5 5h15M5 12h15M5 19h15"/><circle cx="2" cy="5" r=".5"/><circle cx="2" cy="12" r=".5"/><circle cx="2" cy="19" r=".5"/></svg>';
+function updateMindmapViewport() {
+  const dialog = $('mindmap-dialog');
+  if (!dialog.open) return;
+  const viewport = window.visualViewport;
+  dialog.style.height = Math.min(viewport?.height || window.innerHeight, nativeVisibleHeight) + 'px';
+  dialog.style.top = (viewport?.offsetTop || 0) + 'px';
+}
 function focusMindmap(index) {
   const input = $('mindmap-items').children[index]?.querySelector('input');
   input?.focus();
   input?.setSelectionRange(input.value.length, input.value.length);
+}
+function updateMindmapOutlineButtons() {
+  const root = mindmapActive === 0;
+  $('mindmap-add-sibling').disabled = root;
+  $('mindmap-outdent').disabled = root || mindmapItems[mindmapActive]?.depth <= 1;
+  $('mindmap-indent').disabled = root;
 }
 function renderMindmapItems(focusIndex = -1) {
   $('mindmap-items').replaceChildren(...mindmapItems.map((item, index) => {
@@ -839,43 +855,137 @@ function renderMindmapItems(focusIndex = -1) {
     input.value = item.text;
     input.placeholder = index ? '新主题' : '中心主题';
     input.setAttribute('aria-label', `第 ${index + 1} 个主题`);
-    input.onfocus = () => { mindmapActive = index; };
-    input.oninput = () => { item.text = input.value; if (!$('mindmap-preview').hidden) updateMindmapPreview(); };
+    input.onfocus = () => { mindmapActive = index; updateMindmapOutlineButtons(); };
+    input.oninput = () => { item.text = input.value; };
     input.onkeydown = event => {
       if (event.key === 'Enter') { event.preventDefault(); addMindmapItem(index); }
       else if (event.key === 'Tab') { event.preventDefault(); shiftMindmapItem(index, event.shiftKey ? -1 : 1); }
-      else if (event.key === 'Backspace' && !input.value && mindmapItems.length > 1) {
-        event.preventDefault(); mindmapItems.splice(index, 1); renderMindmapItems(Math.max(0, index - 1));
+      else if (event.key === 'Backspace' && !input.value && index > 0) {
+        event.preventDefault(); deleteMindmapItem(index);
       } else if (event.key === 'ArrowUp' && index > 0 && input.selectionStart === 0) { event.preventDefault(); focusMindmap(index - 1); }
       else if (event.key === 'ArrowDown' && index < mindmapItems.length - 1 && input.selectionStart === input.value.length) { event.preventDefault(); focusMindmap(index + 1); }
     };
     row.append(dot, input);
     return row;
   }));
+  updateMindmapOutlineButtons();
   if (focusIndex >= 0) focusMindmap(focusIndex);
 }
-function addMindmapItem(after = mindmapActive) {
-  const index = Math.min(after + 1, mindmapItems.length);
-  mindmapItems.splice(index, 0, { depth: mindmapItems[after]?.depth || 0, text: '' });
-  renderMindmapItems(index);
+function mindmapSubtreeEnd(index) {
+  let end = index + 1;
+  while (end < mindmapItems.length && mindmapItems[end].depth > mindmapItems[index].depth) end++;
+  return end;
+}
+function addMindmapItem(after = mindmapActive, child = false) {
+  if (!mindmapItems[after]) after = 0;
+  if (after === 0) child = true;
+  const index = child ? after + 1 : mindmapSubtreeEnd(after);
+  const depth = child ? Math.min(4, mindmapItems[after].depth + 1) : mindmapItems[after].depth;
+  mindmapItems.splice(index, 0, { depth, text: '' });
+  mindmapActive = index;
+  if (mindmapMode === 'map') { renderMindmapGraph(); editMindmapGraphNode(); }
+  else renderMindmapItems(index);
 }
 function shiftMindmapItem(index, direction) {
   const item = mindmapItems[index];
-  if (!item) return;
-  item.depth = Math.max(0, Math.min(4, item.depth + direction, index ? mindmapItems[index - 1].depth + 1 : 0));
+  if (!item || index === 0) return;
+  const nextDepth = Math.max(1, Math.min(4, mindmapItems[index - 1].depth + 1, item.depth + direction));
+  const end = mindmapSubtreeEnd(index);
+  const maxDescendantDepth = Math.max(...mindmapItems.slice(index, end).map(node => node.depth));
+  const delta = Math.min(nextDepth - item.depth, 4 - maxDescendantDepth);
+  for (let i = index; i < end; i++) mindmapItems[i].depth += delta;
   renderMindmapItems(index);
 }
-function updateMindmapPreview() { $('mindmap-preview').innerHTML = outlineToSvg(mindmapItems); }
+function deleteMindmapItem(index) {
+  if (index === 0) return;
+  mindmapItems.splice(index, mindmapSubtreeEnd(index) - index);
+  mindmapActive = Math.max(0, Math.min(index - 1, mindmapItems.length - 1));
+  if (mindmapMode === 'map') renderMindmapGraph();
+  else renderMindmapItems(mindmapActive);
+}
+function renderMindmapGraph() {
+  const nodes = mindmapItems.map((item, index) => {
+    const depth = index ? Math.max(1, item.depth) : 0;
+    let parent = -1;
+    for (let i = index - 1; i >= 0; i--) if (mindmapItems[i].depth < depth) { parent = i; break; }
+    return { index, x: 28 + depth * 190, y: 28 + index * 72, parent, text: item.text || (index ? '新主题' : '中心主题') };
+  });
+  const width = Math.max(390, ...nodes.map(node => node.x + 180));
+  const height = Math.max(280, ...nodes.map(node => node.y + 80));
+  const scene = $('mindmap-map-scene');
+  scene.style.width = width + 'px';
+  scene.style.height = height + 'px';
+  const lines = $('mindmap-map-lines');
+  lines.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  lines.setAttribute('width', width);
+  lines.setAttribute('height', height);
+  lines.replaceChildren(...nodes.filter(node => node.parent >= 0).map(node => {
+    const parent = nodes[node.parent];
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M${parent.x + 160} ${parent.y + 24} H${node.x - 20} V${node.y + 24} H${node.x}`);
+    return path;
+  }));
+  $('mindmap-map-nodes').replaceChildren(...nodes.map(node => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mindmap-map-node' + (node.index === 0 ? ' root' : '') + (node.index === mindmapActive ? ' active' : '');
+    button.style.left = node.x + 'px';
+    button.style.top = node.y + 'px';
+    button.dataset.index = node.index;
+    button.textContent = node.text;
+    button.setAttribute('aria-label', `${node.index ? '主题' : '中心主题'}：${node.text}`);
+    button.onclick = () => { mindmapActive = node.index; renderMindmapGraph(); };
+    return button;
+  }));
+  $('mindmap-map-sibling').disabled = mindmapActive === 0;
+  $('mindmap-delete-node').disabled = mindmapActive === 0;
+}
+function editMindmapGraphNode() {
+  const button = $('mindmap-map-nodes').querySelector(`[data-index="${mindmapActive}"]`);
+  if (!button) return;
+  const index = mindmapActive;
+  const original = mindmapItems[index].text;
+  const input = document.createElement('input');
+  input.className = 'mindmap-map-node mindmap-map-input active' + (index === 0 ? ' root' : '');
+  input.style.left = button.style.left;
+  input.style.top = button.style.top;
+  input.value = original;
+  input.placeholder = index ? '新主题' : '中心主题';
+  input.setAttribute('aria-label', '编辑主题文字');
+  input.oninput = () => { mindmapItems[index].text = input.value; };
+  input.onkeydown = event => {
+    if (event.key === 'Enter') { event.preventDefault(); input.blur(); }
+    else if (event.key === 'Escape') { mindmapItems[index].text = original; input.blur(); }
+  };
+  input.onblur = () => { if (mindmapMode === 'map') renderMindmapGraph(); };
+  button.replaceWith(input);
+  input.focus();
+  input.select();
+}
+function setMindmapMode(mode) {
+  mindmapMode = mode;
+  const map = mode === 'map';
+  $('mindmap-outline-view').hidden = map;
+  $('mindmap-outline-tools').hidden = map;
+  $('mindmap-map-view').hidden = !map;
+  $('mindmap-map-tools').hidden = !map;
+  $('mindmap-view-title').textContent = map ? '思维导图' : '大纲';
+  $('mindmap-view-toggle').innerHTML = map ? outlineViewIcon : mapViewIcon;
+  $('mindmap-view-toggle').setAttribute('aria-label', map ? '切换到大纲' : '切换到思维导图');
+  $('mindmap-view-toggle').title = map ? '切换到大纲' : '切换到思维导图';
+  if (map) { document.activeElement?.blur(); renderMindmapGraph(); }
+  else renderMindmapItems();
+}
 function openMindmapEditor(payload = null, card = null, noteId = current) {
   if (!noteId) return;
   mindmapTarget = card ? { card, noteId, payload } : null;
   mindmapItems = payload?.outline?.length ? payload.outline.map(item => ({ depth: Number(item.depth) || 0, text: String(item.text || '') })) : [{ depth: 0, text: '' }];
+  mindmapItems[0].depth = 0;
+  for (let i = 1; i < mindmapItems.length; i++) mindmapItems[i].depth = Math.max(1, Math.min(4, mindmapItems[i - 1].depth + 1, mindmapItems[i].depth));
   mindmapActive = 0;
-  $('mindmap-items').hidden = false;
-  $('mindmap-add').hidden = false;
-  $('mindmap-preview').hidden = true;
-  renderMindmapItems();
+  setMindmapMode('outline');
   $('mindmap-dialog').showModal();
+  updateMindmapViewport();
   focusMindmap(0);
 }
 async function showHistory() {
@@ -1201,21 +1311,19 @@ $('emoji-search').oninput = renderEmojis;
 renderEmojis();
 $('emoji-close').onclick = () => $('emoji-dialog').close();
 $('mindmap-cancel').onclick = () => $('mindmap-dialog').close();
-$('mindmap-add').onclick = () => addMindmapItem();
+$('mindmap-add').onclick = () => addMindmapItem(mindmapActive, mindmapActive === 0);
+$('mindmap-add-sibling').onclick = () => addMindmapItem(mindmapActive);
+$('mindmap-add-child').onclick = () => addMindmapItem(mindmapActive, true);
 $('mindmap-indent').onclick = () => shiftMindmapItem(mindmapActive, 1);
 $('mindmap-outdent').onclick = () => shiftMindmapItem(mindmapActive, -1);
-$('mindmap-preview-toggle').onclick = () => {
-  const show = $('mindmap-preview').hidden;
-  $('mindmap-preview').hidden = !show;
-  $('mindmap-items').hidden = show;
-  $('mindmap-add').hidden = show;
-  if (show) { document.activeElement?.blur(); updateMindmapPreview(); }
-  else focusMindmap(mindmapActive);
-};
+$('mindmap-view-toggle').onclick = () => setMindmapMode(mindmapMode === 'outline' ? 'map' : 'outline');
+$('mindmap-edit-node').onclick = editMindmapGraphNode;
+$('mindmap-map-sibling').onclick = () => addMindmapItem(mindmapActive);
+$('mindmap-map-child').onclick = () => addMindmapItem(mindmapActive, true);
+$('mindmap-delete-node').onclick = () => deleteMindmapItem(mindmapActive);
 $('mindmap-save').onclick = async () => {
-  const outline = mindmapItems.filter(item => item.text.trim()).map(item => ({ depth: item.depth, text: item.text.trim() }));
-  if (!outline.length) { toast('输入主题'); return; }
-  outline[0].depth = 0;
+  if (!mindmapItems[0]?.text.trim()) { toast('输入中心主题'); return; }
+  const outline = mindmapItems.filter(item => item.text.trim()).map((item, index) => ({ depth: index ? Math.max(1, item.depth) : 0, text: item.text.trim() }));
   const data = bytesToUrl(new TextEncoder().encode(outlineToSvg(outline)));
   const payload = { kind: 'mindmap', name: '思维导图.svg', mime: 'image/svg+xml', data, outline, caption: mindmapTarget?.payload?.caption || '', scale: mindmapTarget?.payload?.scale || 1 };
   $('mindmap-dialog').close();
@@ -1401,8 +1509,8 @@ $('record-cancel').onclick = () => {
   $('record-dialog').close();
 };
 $('record-pick').onclick = () => { $('record-dialog').close(); $('pick-audio').click(); };
-window.visualViewport?.addEventListener('resize', updateEditorViewport);
-window.visualViewport?.addEventListener('scroll', updateEditorViewport);
+window.visualViewport?.addEventListener('resize', () => { updateEditorViewport(); updateMindmapViewport(); });
+window.visualViewport?.addEventListener('scroll', () => { updateEditorViewport(); updateMindmapViewport(); });
 window.addEventListener('online', sync);
 window.addEventListener('popstate', () => { $('settings-panel').hidden = true; });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });

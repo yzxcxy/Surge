@@ -50,6 +50,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .search input::placeholder { color: #aaa; }
 .toolbar > button { display: grid; place-items: center; width: 43px; height: 43px; flex: none; padding: 10px; border: 0; border-radius: 13px; background: #fff; color: #555; }
 .toolbar > button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#layout-toggle { -webkit-tap-highlight-color: transparent; user-select: none; touch-action: manipulation; }
+#layout-toggle:focus:not(:focus-visible) { outline: none; }
+#layout-toggle:focus-visible { outline: 2px solid #e6ad20; outline-offset: 3px; }
 .category-row { display: flex; align-items: center; gap: 11px; margin: -8px 0 20px; color: #999; font-size: 11px; }
 .category-row > span { flex: none; }
 .category-strip { display: flex; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
@@ -231,10 +234,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .drawing-size output { min-width: 17px; color: #888; font-size: 12px; text-align: right; }
 .mindmap-dialog { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: #fff; color: #222; }
 .mindmap-dialog[open] { display: flex; flex-direction: column; }
+.mindmap-dialog [hidden] { display: none !important; }
 .mindmap-dialog::backdrop { background: #fff; }
 .mindmap-dialog header { display: flex; align-items: center; justify-content: space-between; flex: none; height: 74px; padding: 10px 20px; border-bottom: 1px solid #f1f1f1; }
 .mindmap-dialog h2 { margin: 0; font-size: 19px; font-weight: 600; }
 .mindmap-dialog header button { width: 40px; height: 40px; border: 0; background: none; color: #222; font-size: 27px; }
+.mindmap-header-actions { display: flex; align-items: center; gap: 12px; }
+.mindmap-header-actions svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .mindmap-content { flex: 1; min-height: 0; width: min(820px, 100%); margin: 0 auto; padding: 22px 20px 60px; overflow-y: auto; }
 .mindmap-items { display: grid; gap: 4px; }
 .mindmap-row { display: flex; align-items: center; gap: 9px; min-height: 49px; margin-left: calc(var(--depth, 0) * 27px); border-bottom: 1px solid #f2f2f2; }
@@ -243,11 +249,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mindmap-row input { width: 100%; min-width: 0; padding: 10px 4px; border: 0; outline: 0; background: none; color: #242424; font-size: 17px; }
 .mindmap-row input::placeholder { color: #b0b0b0; }
 .mindmap-add { margin: 20px 0 0; padding: 9px 4px; border: 0; background: none; color: #777; font-size: 14px; }
-.mindmap-preview { overflow: auto; }
-.mindmap-preview svg { display: block; max-width: none; }
-.mindmap-dialog footer { display: flex; justify-content: center; gap: 35px; flex: none; min-height: 64px; padding: 9px 20px calc(9px + env(safe-area-inset-bottom)); border-top: 1px solid #eee; background: #fff; }
+.mindmap-map-view { flex: 1; min-height: 0; overflow: auto; background: radial-gradient(#ececec .7px, transparent 1px) 0 0 / 22px 22px, #fff; overscroll-behavior: contain; }
+.mindmap-map-scene { position: relative; min-width: 100%; min-height: 100%; }
+#mindmap-map-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+#mindmap-map-lines path { fill: none; stroke: #c8c8c8; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.mindmap-map-node { position: absolute; display: flex; align-items: center; width: 160px; min-height: 48px; padding: 8px 12px; border: 1px solid #e4e4e4; border-radius: 12px; background: #fff; color: #303030; box-shadow: 0 3px 12px #0000000c; font-size: 14px; text-align: left; overflow-wrap: anywhere; }
+.mindmap-map-node.root { border-color: #ecc45a; background: #fff5d6; font-weight: 600; }
+.mindmap-map-node.active { outline: 2px solid #f0b720; outline-offset: 2px; }
+.mindmap-map-input { outline: 2px solid #f0b720; appearance: none; }
+.mindmap-dialog footer { display: flex; justify-content: space-around; gap: 12px; flex: none; min-height: 64px; padding: 9px 20px calc(9px + env(safe-area-inset-bottom)); border-top: 1px solid #eee; background: #fff; }
 .mindmap-dialog footer button { display: grid; place-items: center; width: 45px; height: 45px; border: 0; border-radius: 11px; background: none; color: #333; font-size: 25px; }
 .mindmap-dialog footer svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.mindmap-dialog footer button:disabled { opacity: .35; }
 .emoji-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .emoji-grid button { padding: 10px 4px; border: 0; border-radius: 9px; background: #f4f4f4; font-size: 24px; }
 #record-status { color: #888; font-size: 14px; }
@@ -293,6 +306,11 @@ body.glass .setup-card { background: #ffffffb8; backdrop-filter: blur(24px); -we
 .editor[data-background="sky"], .note-card[data-background="sky"], .background-strip button[data-background="sky"] { background: linear-gradient(140deg, #f4f9ff, #e3eef8); }
 .editor[data-background="lavender"], .note-card[data-background="lavender"], .background-strip button[data-background="lavender"] { background: linear-gradient(140deg, #faf8ff, #eee9f8); }
 body.glass .editor[data-background="paper"] { background: radial-gradient(circle at 12% 9%, #e9f1fa 0, transparent 36%), radial-gradient(circle at 88% 82%, #f9f2ec 0, transparent 45%), #f8fafb; }
+body.glass .editor[data-background="warm"] { background: linear-gradient(140deg, #fff9ea, #f8efd9); }
+body.glass .editor[data-background="rose"] { background: linear-gradient(140deg, #fff7f5, #f8e9e8); }
+body.glass .editor[data-background="sage"] { background: linear-gradient(140deg, #f6faf4, #e6f0e3); }
+body.glass .editor[data-background="sky"] { background: linear-gradient(140deg, #f4f9ff, #e3eef8); }
+body.glass .editor[data-background="lavender"] { background: linear-gradient(140deg, #faf8ff, #eee9f8); }
 body.glass .note-card[data-background="warm"] { background: #fff6dfce; }
 body.glass .note-card[data-background="rose"] { background: #fbeae8ce; }
 body.glass .note-card[data-background="sage"] { background: #eaf4e8ce; }

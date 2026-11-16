@@ -21,6 +21,21 @@ export async function putMeta(db, key, value) {
 export async function putOps(db, ops) {
   return new Promise((resolve, reject) => { const tx = db.transaction('ops', 'readwrite'); for (const op of ops) tx.objectStore('ops').put(op); tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
 }
+export async function pruneNote(db, noteId, blobIds = []) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['ops', 'blobs'], 'readwrite');
+    const cursor = tx.objectStore('ops').openCursor();
+    cursor.onsuccess = () => {
+      const row = cursor.result;
+      if (!row) return;
+      if (row.value.noteId === noteId && row.value.field !== 'purged') row.delete();
+      row.continue();
+    };
+    for (const id of blobIds) tx.objectStore('blobs').delete(id);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
 export async function getBlob(db, id) { return requestResult(db.transaction('blobs').objectStore('blobs').get(id)); }
 export async function allBlobs(db) { return requestResult(db.transaction('blobs').objectStore('blobs').getAll()); }
 export async function putBlobs(db, blobs) {

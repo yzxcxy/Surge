@@ -14,6 +14,10 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (bridge != null && bridge.getWebView() != null) {
+            bridge.getWebView().getSettings().setSupportZoom(false);
+            bridge.getWebView().getSettings().setBuiltInZoomControls(false);
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             View decor = getWindow().getDecorView();
             decor.getViewTreeObserver().addOnGlobalLayoutListener(() -> {

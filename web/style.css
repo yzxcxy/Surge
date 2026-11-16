@@ -4,6 +4,7 @@
   background: #f7f7f7;
   font-synthesis: none;
 }
+html { touch-action: pan-x pan-y; }
 
 * { box-sizing: border-box; }
 body { margin: 0; }
@@ -37,6 +38,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mobile-actions { display: none; }
 .content { max-width: 980px; margin: 0 auto; padding: 58px 42px 100px; }
 .hero { display: flex; align-items: end; justify-content: space-between; margin-bottom: 34px; }
+.hero-actions { display: flex; align-items: center; gap: 10px; }
+#clear-trash { margin: 0; color: #a04e4e; }
 .hero-heading { display: flex; align-items: center; gap: 14px; }
 #trash-back { padding: 3px 7px; border: 0; background: none; color: #222; font-size: 28px; }
 .hero h1 { margin: 0; font-size: 36px; line-height: 1.25; letter-spacing: -1px; }
@@ -80,12 +83,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .batch-bar button { display: grid; place-items: center; flex: none; width: 42px; height: 42px; padding: 8px; border: 0; border-radius: 12px; background: none; color: #333; font-size: 28px; }
 .batch-bar button:active { background: #f2f2f2; }
 .batch-bar svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.todo-list { display: grid; gap: 12px; }
-.todo-item { display: flex; align-items: flex-start; gap: 16px; min-height: 75px; padding: 19px 22px; border-radius: 18px; background: #fff; }
-.todo-item input { width: 21px; height: 21px; margin: 3px 0 0; accent-color: #242424; }
-.todo-item button { display: grid; gap: 5px; flex: 1; padding: 0; border: 0; background: none; color: #222; text-align: left; font-size: 16px; }
-.todo-item input:checked + button span { color: #999; text-decoration: line-through; }
-.todo-item small { color: #aaa; font-size: 12px; }
+.todo-list { display: grid; gap: 14px; }
+.todo-card { padding: 20px 22px; border-radius: 21px; background: #fff; }
+.todo-card-head { display: flex; align-items: center; gap: 16px; min-height: 44px; }
+.todo-card input[type=checkbox], .todo-edit-row input[type=checkbox] { flex: none; width: 22px; height: 22px; margin: 0; accent-color: #aaa; }
+.todo-card-title { display: grid; gap: 6px; flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: #222; text-align: left; }
+.todo-card-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 600; }
+.todo-card-title small { color: #aaa; font-size: 12px; }
+.todo-progress { color: #999; font-size: 13px; white-space: nowrap; }
+.todo-expand { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border: 0; border-radius: 50%; background: #f2f2f2; color: #777; font-size: 22px; }
+.todo-card-items { display: grid; gap: 2px; margin: 10px 0 0 38px; }
+.todo-card-items label { display: flex; align-items: center; gap: 15px; min-height: 45px; color: #333; font-size: 15px; }
+.todo-card-items label:has(input:checked) span { color: #aaa; text-decoration: line-through; }
+.trash-card { min-width: 0; }
+.trash-card .note-card { width: 100%; }
+.trash-card-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 5px 4px 0; }
+.trash-card-actions button { padding: 8px 10px; border: 0; background: none; color: #777; font-size: 12px; }
+.trash-card-actions button:last-child { color: #a85151; }
 .empty { padding: 80px 0; color: #999; text-align: center; font-size: 14px; }
 #fab, .mobile-nav, .tabbar { display: none; }
 
@@ -191,6 +205,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .image-source-options { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .image-source-options button { display: grid; place-items: center; gap: 8px; min-height: 96px; border: 0; border-radius: 14px; background: #f5f5f5; color: #303030; font-size: 14px; }
 .image-source-options svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.new-type-options { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.new-type-options button { display: grid; justify-items: center; gap: 12px; padding: 22px 10px; border: 0; border-radius: 16px; background: #f5f5f5; color: #282828; font-size: 15px; }
+.new-type-options svg { width: 29px; height: 29px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.new-type-dialog > .text-button { margin-bottom: 0; }
+.todo-dialog { position: fixed; right: 0; bottom: 0; left: 0; width: min(600px, 100vw); max-width: none; max-height: min(72dvh, 760px); margin: auto auto 0; padding: 0; overflow: hidden; border: 0; border-radius: 24px 24px 0 0; background: #fff; color: #222; box-shadow: 0 -15px 50px #0002; }
+.todo-dialog::backdrop { background: #0005; }
+.todo-sheet { display: flex; flex-direction: column; max-height: inherit; padding: 24px 24px calc(18px + env(safe-area-inset-bottom)); }
+.todo-sheet header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.todo-sheet h2 { margin: 0; font-size: 19px; font-weight: 600; }
+.todo-sheet header button { width: 32px; height: 32px; border: 0; background: none; color: #888; font-size: 28px; }
+.todo-title-input { width: 100%; padding: 10px 0 16px; border: 0; border-bottom: 1px solid #eee; outline: 0; background: none; font-size: 21px; font-weight: 600; }
+.todo-edit-items { min-height: 110px; max-height: 38dvh; overflow-y: auto; padding: 12px 0; }
+.todo-edit-row { display: flex; align-items: center; gap: 15px; min-height: 53px; }
+.todo-edit-row input[type=text] { flex: 1; min-width: 0; padding: 10px 0; border: 0; outline: 0; background: none; color: #222; font-size: 16px; }
+.todo-edit-row input[type=text]::placeholder { color: #b4b4b4; }
+.todo-add-item { align-self: flex-start; padding: 9px 0; border: 0; background: none; color: #888; font-size: 14px; }
+.todo-sheet footer { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+.todo-sheet footer .primary { margin-left: auto; }
+.todo-date-label { position: relative; display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 10px; background: #f2f2f2; color: #555; font-size: 13px; overflow: hidden; }
+.todo-date-label svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.todo-date-label input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.todo-sheet footer .text-button { margin: 0; }
 .image-source-dialog .dialog-actions button:last-child { background: #f1f1f1; color: #333; }
 #move-folder { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 10px; background: #fff; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
@@ -240,9 +276,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mindmap-dialog::backdrop { background: #fff; }
 .mindmap-dialog header { display: flex; align-items: center; justify-content: space-between; flex: none; height: 74px; padding: 10px 20px; border-bottom: 1px solid #f1f1f1; }
 .mindmap-dialog h2 { margin: 0; font-size: 19px; font-weight: 600; }
-.mindmap-dialog header button { width: 40px; height: 40px; border: 0; background: none; color: #222; font-size: 27px; }
+.mindmap-dialog header button { width: 40px; height: 40px; border: 0; outline: none; background: none; color: #222; font-size: 27px; -webkit-tap-highlight-color: transparent; }
+@media (pointer: fine) { .mindmap-dialog header button:focus-visible { outline: 2px solid #555; outline-offset: 2px; } }
 .mindmap-header-actions { display: flex; align-items: center; gap: 12px; }
 .mindmap-header-actions svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.mindmap-more-menu { position: absolute; z-index: 4; top: 66px; right: 22px; display: grid; min-width: 155px; padding: 7px; border: 1px solid #ededed; border-radius: 13px; background: #fff; box-shadow: 0 9px 28px #0002; }
+.mindmap-more-menu[hidden] { display: none; }
+.mindmap-more-menu button { padding: 10px 12px; border: 0; border-radius: 8px; background: none; color: #333; text-align: left; font-size: 13px; }
+.mindmap-more-menu button:active { background: #f3f3f3; }
 .mindmap-content { flex: 1; min-height: 0; width: min(820px, 100%); margin: 0 auto; padding: 22px 20px 60px; overflow-y: auto; }
 .mindmap-items { display: grid; gap: 4px; }
 .mindmap-row { display: flex; align-items: center; gap: 9px; min-height: 49px; margin-left: calc(var(--depth, 0) * 27px); border-bottom: 1px solid #f2f2f2; }
@@ -251,18 +292,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mindmap-row input { width: 100%; min-width: 0; padding: 10px 4px; border: 0; outline: 0; background: none; color: #242424; font-size: 17px; }
 .mindmap-row input::placeholder { color: #b0b0b0; }
 .mindmap-add { margin: 20px 0 0; padding: 9px 4px; border: 0; background: none; color: #777; font-size: 14px; }
-.mindmap-map-view { flex: 1; min-height: 0; overflow: auto; background: radial-gradient(#ececec .7px, transparent 1px) 0 0 / 22px 22px, #fff; overscroll-behavior: contain; }
+.mindmap-map-view { flex: 1; min-height: 0; overflow: auto; outline: none; background: #fff; overscroll-behavior: contain; touch-action: pan-x pan-y; }
 .mindmap-map-scene { position: relative; min-width: 100%; min-height: 100%; }
 #mindmap-map-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
-#mindmap-map-lines path { fill: none; stroke: #c8c8c8; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.mindmap-map-node { position: absolute; display: flex; align-items: center; width: 160px; min-height: 48px; padding: 8px 12px; border: 1px solid #e4e4e4; border-radius: 12px; background: #fff; color: #303030; box-shadow: 0 3px 12px #0000000c; font-size: 14px; text-align: left; overflow-wrap: anywhere; }
-.mindmap-map-node.root { border-color: #ecc45a; background: #fff5d6; font-weight: 600; }
-.mindmap-map-node.active { outline: 2px solid #f0b720; outline-offset: 2px; }
-.mindmap-map-input { outline: 2px solid #f0b720; appearance: none; }
+#mindmap-map-lines path { fill: none; stroke: #bfc2c5; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.mindmap-map-node { position: absolute; display: flex; align-items: center; justify-content: center; width: var(--map-node-width, 144px); min-height: 48px; padding: 7px 9px; border: 1.5px solid #393939; border-radius: 11px; background: #fff; color: #303030; font-size: 13px; text-align: center; overflow-wrap: anywhere; }
+.mindmap-map-node.root { border-color: #111; background: #111; color: #fff; font-weight: 600; }
+.mindmap-map-node.active:not(.root) { border-width: 2px; }
+.mindmap-map-input { outline: 2px solid #555; appearance: none; }
+.mindmap-node-actions { position: absolute; display: flex; align-items: center; height: 40px; padding: 0 5px; border-radius: 6px; background: #4b5057; color: #fff; box-shadow: 0 4px 12px #0002; white-space: nowrap; }
+.mindmap-node-actions::after { content: ''; position: absolute; left: 50%; bottom: -7px; border: 7px solid transparent; border-top-color: #4b5057; border-bottom: 0; }
+.mindmap-node-actions button { padding: 7px 9px; border: 0; border-right: 1px solid #ffffff3a; background: none; color: inherit; font-size: 12px; }
+.mindmap-node-actions button:last-child { border-right: 0; }
+.mindmap-inline-add { position: absolute; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: #b8b8b8; color: #fff; font-size: 18px; line-height: 1; }
 .mindmap-dialog footer { display: flex; justify-content: space-around; gap: 12px; flex: none; min-height: 64px; padding: 9px 20px calc(9px + env(safe-area-inset-bottom)); border-top: 1px solid #eee; background: #fff; }
 .mindmap-dialog footer button { display: grid; place-items: center; width: 45px; height: 45px; border: 0; border-radius: 11px; background: none; color: #333; font-size: 25px; }
 .mindmap-dialog footer svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 .mindmap-dialog footer button:disabled { opacity: .35; }
+.mindmap-dialog #mindmap-map-tools { position: absolute; right: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(50%); width: min(360px, calc(100vw - 32px)); min-height: 58px; justify-content: space-evenly; padding: 6px 12px; border: 0; border-radius: 32px; background: #fffffff2; box-shadow: 0 5px 28px #00000018; backdrop-filter: blur(20px); }
 #record-status { color: #888; font-size: 14px; }
 #toast { position: fixed; left: 50%; bottom: 110px; z-index: 100; transform: translateX(-50%); padding: 9px 15px; border-radius: 11px; background: #222e; color: #fff; font-size: 13px; }
 
@@ -287,7 +334,7 @@ body.glass { background: #e9eef3; }
 body.glass .main { background: radial-gradient(circle at 20% 20%, #e3edf9 0, transparent 38%), radial-gradient(circle at 85% 70%, #f6e7dd 0, transparent 42%), #edf0f3; }
 body.glass .topbar { border-bottom: 0; background: linear-gradient(180deg, #e5eff9a3, #e5eff900); box-shadow: none; backdrop-filter: blur(28px) saturate(170%); -webkit-backdrop-filter: blur(28px) saturate(170%); }
 body.glass .tabbar, body.glass .mobile-nav:not([hidden]) { background: #ffffff8f; backdrop-filter: blur(20px) saturate(145%); -webkit-backdrop-filter: blur(20px) saturate(145%); }
-body.glass .note-card, body.glass .todo-item, body.glass .search, body.glass .toolbar > button { border: 1px solid #ffffff99; background: #ffffffa8; backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); }
+body.glass .note-card, body.glass .todo-card, body.glass .search, body.glass .toolbar > button { border: 1px solid #ffffff99; background: #ffffffa8; backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); }
 body.glass .settings-panel { background: radial-gradient(circle at 20% 12%, #e2edfa, transparent 42%), #edf0f3; }
 body.glass .settings-panel header { border-bottom: 0; background: linear-gradient(180deg, #e5eff9a3, #e5eff900); backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%); }
 body.glass .settings-group { border: 1px solid #ffffffb0; background: #ffffffa1; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
@@ -376,6 +423,7 @@ body.glass .note-card[data-background="lavender"] { background: #f0ebf9ce; }
   .more-menu { top: 75px; right: 19px; }
   html.native-app .drawing-header { padding-top: 42px; min-height: 100px; }
   html.native-app .mindmap-dialog header { padding-top: 40px; height: 106px; }
+  html.native-app .mindmap-more-menu { top: 98px; }
   .drawing-tools { justify-content: flex-start; }
   html.native-app .drawing-tools { height: 120px; padding-bottom: 24px; justify-content: flex-start; }
   html.native-app .drawing-popover { bottom: 128px; }
@@ -383,7 +431,12 @@ body.glass .note-card[data-background="lavender"] { background: #f0ebf9ce; }
   .history-panel { position: fixed; inset: 0; width: 100%; height: 100dvh; border: 0; }
   .history-panel header { height: 84px; padding: 20px 26px 0; }
   html.native-app .history-panel header { height: 108px; padding-top: 42px; }
-  .todo-item { min-height: 72px; padding: 17px 19px; }
+  .todo-card { padding: 18px 19px; }
+  .todo-card-head { gap: 13px; }
+  .todo-card-items { margin-left: 35px; }
+  .todo-dialog { width: 100vw; }
+  .todo-sheet { padding: 22px 20px calc(17px + env(safe-area-inset-bottom)); }
+  #clear-trash { padding: 6px 0; font-size: 12px; }
   .settings-panel { width: 100%; border: 0; }
   .settings-panel header { height: 84px; padding: 20px 25px 0; }
   html.native-app .settings-panel header { height: 108px; padding-top: 42px; }

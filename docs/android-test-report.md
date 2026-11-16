@@ -4,7 +4,7 @@
 
 ## 构建与交付物
 
-- 真机测试包：[surge-android-device-test.apk](https://github.com/yzxcxy/Surge/releases/download/v1.4.0/surge-android-device-test.apk)，由 `assembleRelease` 的未签名 APK 对齐后，以独立的本机测试密钥签名。包名 `org.surge.notes`，`versionCode=7`、`versionName=1.4.0`，最低 Android 6.0（API 23），目标 API 35。SHA-256：`1ddc60520e776ebed0d209510f867e59dd994687b5b67c02c0aeccc336631741`；签名证书 SHA-256：`9acac77ddfd6bc6e545744b9eeb612a3c0b1a3700d0eea7f3baf80f968ff2345`。`zipalign -c` 和 `apksigner verify` 均通过（v1、v2、v3）。签名密钥保存在本机 `~/.local/share/surge/signing/`，未纳入项目或 APK；后续覆盖安装需使用同一密钥。
+- 真机测试包：[surge-android-device-test.apk](https://github.com/yzxcxy/Surge/releases/download/v1.5.0/surge-android-device-test.apk)，由 `assembleRelease` 的未签名 APK 对齐后，以独立的本机测试密钥签名。包名 `org.surge.notes`，`versionCode=8`、`versionName=1.5.0`，最低 Android 6.0（API 23），目标 API 35。SHA-256：`e5cdcecd709aeeef7e62e3e124f7543b419bdd39a342dc3d1bad756174cb6828`；签名证书 SHA-256：`9acac77ddfd6bc6e545744b9eeb612a3c0b1a3700d0eea7f3baf80f968ff2345`。`zipalign -c` 和 `apksigner verify` 均通过（v1、v2、v3）。签名密钥保存在本机 `~/.local/share/surge/signing/`，未纳入项目或 APK；后续覆盖安装需使用同一密钥。
 - 上述真机包没有调试构建的自签 CA 信任配置；尚未在用户的实体设备上测试。若设备已装相同包名的调试签名版本，Android 不允许直接覆盖安装。
 - Docker Compose 服务 `surge-surge-1` 在 `8787` 端口运行，`GET /api/health` 返回 `{"ok":true}`；重启容器后随机盐值保持一致。测试结束时，正式 Docker 卷的操作日志游标仍为 0。
 - 安装 OpenJDK 21、Android SDK 平台 35、Build Tools 35、Platform Tools 和 Emulator，并执行 `npm run android:sync` 与 `./gradlew assembleDebug --no-daemon`，构建成功。
@@ -97,3 +97,11 @@
 - 格式栏增加下划线、删除线、有序/无序列表、引用、分割线和左/中/右对齐；引用改用双引号图标并可再次点击退出。移除独立表情入口；正文保留连续空格。浏览器检查了格式操作以及 Markdown 保存后重新渲染的往返结果。
 - 思维导图编辑窗设为可平移、不可双指缩放；Android WebView 计算样式为 `touch-action: pan-x pan-y`。
 - `npm test` 6 项、Android debug/release 构建、APK 对齐及签名校验通过；模拟器覆盖安装后显示 `versionCode=7`、`versionName=1.4.0`。
+
+## 2026-11-16 版本 1.5.0
+
+- 整体页面关闭双指缩放。Android 15 模拟器对整个 WebView 合成放大手势后，`visualViewport.scale` 从 1 保持为 1；导图画布仍可平移。
+- 新增独立思维笔记：从“新建”选择类型后直接进入导图，中心主题与左右一级分支在手机宽度内完整显示，选中节点可就近添加、编辑和删除；保存、重开后结构保留。[导图截图](android-v15-mindmap.png)。
+- 待办页只显示独立清单卡片，不再汇集笔记正文里的清单行；底部输入层贴在 Android 键盘上沿。测试创建两项、展开、勾选与刷新后进度保留。[待办截图](android-v15-todo.png)。
+- 回收站可逐项移除或一键清空。独立浏览器数据目录实测清空两项后，IndexedDB 对应条目的历史操作只剩加密的 `purged` 标记；已同步的旧密文仍在 Docker 服务端追加日志与附件存储中。
+- `npm test` 6 项、Obsidian 插件类型检查与构建、Android debug/release 构建、APK 对齐及签名校验通过。Docker Compose 重建后 `/api/health` 返回 `{"ok":true}`。

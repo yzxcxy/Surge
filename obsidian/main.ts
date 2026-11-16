@@ -2,7 +2,7 @@ import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder }
 import { deriveKey, makeOp, materialize, fetchInfo, exchange } from '../web/core.mjs';
 
 type Op = { id:string; noteId:string; field:string; clock:number; actor:string; ciphertext:string; localPending?:boolean };
-type Note = { id:string; title:string; body:string; folder:string; pinned:boolean; deleted:boolean; background:string; updatedAt:number };
+type Note = { id:string; title:string; body:string; folder:string; pinned:boolean; deleted:boolean; purged?:boolean; kind?:string; reminderAt?:number; background:string; updatedAt:number };
 type State = { server:string; token:string; salt:string; actor:string; clock:number; cursor:number; ops:Op[] };
 const initial = ():State => ({ server:'', token:'', salt:'', actor:crypto.randomUUID(), clock:0, cursor:0, ops:[] });
 const clean = (op:Op) => ({ id:op.id, noteId:op.noteId, field:op.field, clock:op.clock, actor:op.actor, ciphertext:op.ciphertext });
@@ -67,6 +67,7 @@ export default class SurgePlugin extends Plugin {
     const id=parsed.id || crypto.randomUUID();
     const folder=file.parent?.path==='Surge'?'':(file.parent?.path||'').replace(/^Surge\//,'');
     const existing=this.notes.get(id);
+    if(existing?.purged) return;
     if(!parsed.id) {
       this.applying.add(file.path);
       await this.app.vault.modify(file,`---\nsurge-id: ${id}\n---\n${content}`);
@@ -94,6 +95,8 @@ export default class SurgePlugin extends Plugin {
       this.state.cursor=result.cursor; await this.save();
       const material=await materialize(this.state.ops,this.key);
       this.notes=material.notes as Map<string,Note>; this.state.clock=Math.max(this.state.clock,material.maxClock);
+      const purged=new Set([...this.notes.values()].filter(note=>note.purged).map(note=>note.id));
+      if(purged.size) { this.state.ops=this.state.ops.filter(op=>!purged.has(op.noteId)||op.field==='purged'); await this.save(); }
       await this.toVault();
       new Notice('Surge 同步完成',2000);
     } catch(e:any) { new Notice(`Surge 同步失败：${e.message}`,5000); }
@@ -110,7 +113,7 @@ export default class SurgePlugin extends Plugin {
     for(const note of this.notes.values()) {
       if(note.body==='surge-internal-category-record-v1') continue;
       const file=existing.get(note.id);
-      if(note.deleted) { if(file) { this.applying.add(file.path); await this.app.vault.trash(file,true); setTimeout(()=>this.applying.delete(file.path),700); } continue; }
+      if(note.deleted || note.purged) { if(file) { this.applying.add(file.path); await this.app.vault.trash(file,true); setTimeout(()=>this.applying.delete(file.path),700); } continue; }
       const folder='Surge'+(note.folder?'/'+note.folder.split('/').map(safe).join('/'): '');
       await this.ensureFolder(folder);
       const target=`${folder}/${safe(note.title)}--${note.id}.md`;

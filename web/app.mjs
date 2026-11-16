@@ -1,5 +1,5 @@
 import { bytesToUrl, decryptValue, deriveKey, downloadBlob, encryptValue, exchange, fetchInfo, historyForNote, makeOp, materialize, reencryptOps, uploadBlob, urlToBytes } from './core.mjs';
-import { allBlobs, allOps, getBlob, getMeta, openDb, putBlobs, putMeta, putOps, replaceVault } from './db.mjs';
+import { allBlobs, allOps, getBlob, getMeta, openDb, pruneNote, putBlobs, putMeta, putOps, replaceVault } from './db.mjs';
 import { attachmentNode, tableNode, renderInlineMarkdown, renderMarkdown, serializeMarkdown } from './rich-editor.mjs';
 import { APP_VERSION, DEFAULT_REPOSITORY, compareVersions, latestRelease } from './updates.mjs';
 
@@ -14,6 +14,7 @@ let attachmentUrls = [];
 let bodyRange = null;
 let attachmentTarget = null, attachmentPayload = null;
 let selectMode = false, selectedNotes = new Set(), moveTargets = [];
+let editingTodoId = null, todoExpanded = new Set();
 let nativeVisibleHeight = Infinity;
 let layout = localStorage.getItem('surge-layout') === 'grid' ? 'grid' : 'list';
 const vaultMarker = 'surge-vault-v1';
@@ -32,6 +33,7 @@ const previewBody = value => editableBody(value)
   .replace(/\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`/g, (_, strong, emphasis, code) => strong || emphasis || code)
   .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '$1')
   .trim();
+const mindmapPreview = value => value.split('\n').filter(line => /^\s*-\s/.test(line)).slice(0, 3).map(line => line.replace(/^\s*-\s*/, '')).join(' · ');
 const gridIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';
 const listIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16"/></svg>';
 const backgrounds = [
@@ -85,22 +87,23 @@ function viewName() {
 function activeNotes() {
   return [...notes.values()]
     .filter(n => n.id !== draftId)
-    .filter(n => !isFolderRecord(n))
+    .filter(n => !isFolderRecord(n) && !n.purged)
     .filter(n => view === 'trash' ? n.deleted : !n.deleted && (view === 'all' || (view === 'pinned' ? n.pinned : n.folder === view)))
+    .filter(n => view === 'trash' || (tab === 'todos' ? noteKind(n) === 'todo' : noteKind(n) !== 'todo'))
     .filter(n => (n.title + '\n' + n.body).toLowerCase().includes(query))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt);
 }
-function tasksFrom(list) {
-  return list.flatMap(note => note.body.split('\n').flatMap((line, index) => {
-    const match = line.match(/^\s*-\s*\[([ xX])\]\s*(.*)$/);
-    return match ? [{ note, index, text: match[2], done: match[1].toLowerCase() === 'x' }] : [];
-  }));
+const legacyTodo = note => !note.stamps?.kind && /^- \[[ xX]\] [^\n]+$/.test(note.body) && note.title === note.body.slice(6);
+const noteKind = note => ['todo', 'mindmap'].includes(note.kind) ? note.kind : (legacyTodo(note) ? 'todo' : 'note');
+function todoItems(note) {
+  return (note.body || '').split('\n').map(line => /^- \[([ xX])\] (.*)$/.exec(line)).filter(Boolean).map(match => ({ done: match[1].toLowerCase() === 'x', text: match[2] }));
 }
+const todoBody = items => items.filter(item => item.text.trim()).map(item => `- [${item.done ? 'x' : ' '}] ${item.text.trim()}`).join('\n');
 function allFolders() {
   return [...new Set([
     ...folderCatalog,
-    ...[...notes.values()].filter(note => !note.deleted && isFolderRecord(note) && note.title).map(note => note.title),
-    ...[...notes.values()].filter(note => !note.deleted && !isFolderRecord(note) && note.folder).map(note => note.folder)
+    ...[...notes.values()].filter(note => !note.deleted && !note.purged && isFolderRecord(note) && note.title).map(note => note.title),
+    ...[...notes.values()].filter(note => !note.deleted && !note.purged && !isFolderRecord(note) && note.folder).map(note => note.folder)
   ])].sort();
 }
 function updateFolderSelect(folders) {
@@ -146,8 +149,11 @@ function render() {
   $('view-title').textContent = name;
   $('breadcrumbs').textContent = name;
   $('trash-back').hidden = view !== 'trash';
-  $('category-strip').parentElement.hidden = view === 'trash';
+  $('category-strip').parentElement.hidden = view === 'trash' || tab === 'todos';
+  $('mobile-folders').hidden = tab === 'todos';
+  $('search').placeholder = tab === 'todos' ? '搜索待办' : '搜索笔记';
   $('new-note').hidden = view === 'trash';
+  $('new-note').textContent = tab === 'todos' ? '新建待办' : '新建笔记';
   $('fab').hidden = view === 'trash';
   $('tabbar').hidden = view === 'trash' || selectMode;
   $('batch-bar').hidden = !selectMode;
@@ -157,9 +163,9 @@ function render() {
   $('todos').hidden = tab !== 'todos';
   $('fab').setAttribute('aria-label', tab === 'todos' ? '新建待办' : '新建笔记');
   const list = activeNotes();
-  const tasks = tasksFrom(list);
-  $('count').textContent = (tab === 'todos' ? tasks.length : list.length) + (tab === 'todos' ? ' 项待办' : ' 条笔记');
-  $('empty').hidden = (tab === 'todos' ? tasks.length : list.length) > 0;
+  $('clear-trash').hidden = view !== 'trash' || ![...notes.values()].some(note => note.deleted && !note.purged && !isFolderRecord(note));
+  $('count').textContent = list.length + (view === 'trash' ? ' 项内容' : tab === 'todos' ? ' 组待办' : ' 条笔记');
+  $('empty').hidden = list.length > 0;
   $('empty').textContent = tab === 'todos' ? '还没有待办' : '还没有笔记';
   $('notes').classList.toggle('list', layout === 'list');
   $('layout-toggle').innerHTML = layout === 'list' ? gridIcon : listIcon;
@@ -168,25 +174,26 @@ function render() {
   $('layout-toggle').setAttribute('aria-pressed', String(layout === 'grid'));
   $('layout-toggle').hidden = tab === 'todos';
   $('sync-now').hidden = !server;
-  $('notes').replaceChildren(...list.map(note => {
+  $('notes').replaceChildren(...(tab === 'notes' ? list : []).map(note => {
     const button = document.createElement('button');
     button.className = 'note-card';
+    button.dataset.noteId = note.id;
     button.dataset.background = note.background || 'paper';
     button.classList.toggle('selecting', selectMode);
     button.classList.toggle('selected', selectedNotes.has(note.id));
     if (selectMode) button.setAttribute('aria-pressed', String(selectedNotes.has(note.id)));
     if (selectMode) { const circle = document.createElement('span'); circle.className = 'select-circle'; circle.setAttribute('aria-hidden', 'true'); button.append(circle); }
     const title = document.createElement('h3');
-    title.textContent = note.title || '未命名笔记';
+    title.textContent = note.title || (noteKind(note) === 'mindmap' ? '未命名思维笔记' : '未命名笔记');
     const preview = document.createElement('p');
-    preview.textContent = previewBody(note.body) || (note.body.includes('surge-blob:') ? '附件' : '空白笔记');
+    preview.textContent = noteKind(note) === 'mindmap' ? (mindmapPreview(note.body) || '思维笔记') : previewBody(note.body) || (note.body.includes('surge-blob:') ? '附件' : '空白笔记');
     const footer = document.createElement('footer');
     const date = document.createElement('span');
     date.textContent = niceDate(note.updatedAt);
     const tag = document.createElement('span');
     tag.className = note.pinned ? 'pin' : '';
     if (note.pinned) { tag.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 3 8 0-1 6 3 3v2H6v-2l3-3-1-6Zm4 11v7"/></svg>'; tag.setAttribute('aria-label', '置顶'); }
-    else tag.textContent = note.folder;
+    else tag.textContent = noteKind(note) === 'mindmap' ? '思维笔记' : noteKind(note) === 'todo' ? '待办' : note.folder;
     footer.append(date, tag);
     button.append(title, preview, footer);
     let hold, held = false, startX = 0, startY = 0;
@@ -203,29 +210,66 @@ function render() {
       if (selectMode) { selectedNotes.has(note.id) ? selectedNotes.delete(note.id) : selectedNotes.add(note.id); if (!selectedNotes.size) exitSelection(); render(); }
       else openEditor(note.id);
     };
-    return button;
+    if (view !== 'trash') return button;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'trash-card';
+    const actions = document.createElement('div');
+    actions.className = 'trash-card-actions';
+    const restore = document.createElement('button');
+    restore.textContent = '恢复';
+    restore.onclick = () => changeNote(note.id, 'deleted', false);
+    const remove = document.createElement('button');
+    remove.textContent = '彻底移除';
+    remove.onclick = () => purgeNote(note.id);
+    actions.append(restore, remove);
+    wrapper.append(button, actions);
+    return wrapper;
   }));
-  $('todos').replaceChildren(...tasks.map(task => {
-    const row = document.createElement('div');
-    row.className = 'todo-item';
-    const check = document.createElement('input');
-    check.type = 'checkbox';
-    check.checked = task.done;
-    check.setAttribute('aria-label', task.text || '待办');
-    check.onchange = () => {
-      const lines = task.note.body.split('\n');
-      lines[task.index] = lines[task.index].replace(/^(\s*-\s*)\[[ xX]\]/, `$1[${check.checked ? 'x' : ' '}]`);
-      changeNote(task.note.id, 'body', lines.join('\n'));
-    };
-    const button = document.createElement('button');
-    const title = document.createElement('span');
-    title.textContent = task.text || '未命名待办';
-    const source = document.createElement('small');
-    source.textContent = task.note.title === task.text ? niceDate(task.note.updatedAt) : task.note.title || niceDate(task.note.updatedAt);
-    button.append(title, source);
-    button.onclick = () => openEditor(task.note.id);
-    row.append(check, button);
-    return row;
+  $('todos').replaceChildren(...(tab === 'todos' ? list : []).map(note => {
+    const items = todoItems(note);
+    const done = items.filter(item => item.done).length;
+    const card = document.createElement('article');
+    card.className = 'todo-card';
+    card.dataset.noteId = note.id;
+    const head = document.createElement('div');
+    head.className = 'todo-card-head';
+    const all = document.createElement('input');
+    all.type = 'checkbox';
+    all.checked = !!items.length && done === items.length;
+    all.setAttribute('aria-label', '完成整组待办');
+    all.onchange = () => changeNote(note.id, 'body', todoBody(items.map(item => ({ ...item, done: all.checked }))));
+    const title = document.createElement('button');
+    title.className = 'todo-card-title';
+    title.innerHTML = `<strong></strong><small></small>`;
+    title.querySelector('strong').textContent = note.title || '未命名待办';
+    title.querySelector('small').textContent = note.reminderAt ? new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(note.reminderAt) : niceDate(note.updatedAt);
+    title.onclick = () => openTodoEditor(note.id);
+    const progress = document.createElement('span');
+    progress.className = 'todo-progress';
+    progress.textContent = `${done} / ${items.length}`;
+    const expand = document.createElement('button');
+    expand.className = 'todo-expand';
+    expand.setAttribute('aria-label', todoExpanded.has(note.id) ? '收起待办' : '展开待办');
+    expand.textContent = todoExpanded.has(note.id) ? '⌃' : '⌄';
+    expand.onclick = () => { todoExpanded.has(note.id) ? todoExpanded.delete(note.id) : todoExpanded.add(note.id); render(); };
+    head.append(all, title, progress, expand);
+    card.append(head);
+    if (todoExpanded.has(note.id)) {
+      const children = document.createElement('div');
+      children.className = 'todo-card-items';
+      items.forEach((item, index) => {
+        const row = document.createElement('label');
+        const check = document.createElement('input');
+        check.type = 'checkbox'; check.checked = item.done;
+        check.onchange = () => changeNote(note.id, 'body', todoBody(items.map((entry, i) => i === index ? { ...entry, done: check.checked } : entry)));
+        const text = document.createElement('span');
+        text.textContent = item.text;
+        row.append(check, text);
+        children.append(row);
+      });
+      card.append(children);
+    }
+    return card;
   }));
   updateFolderSelect(folders);
 }
@@ -316,8 +360,10 @@ function setTab(next) {
   discardDraft();
   exitSelection();
   tab = next;
+  if (next === 'todos') view = 'all';
   current = null;
   $('editor').hidden = true;
+  closeMobileNav();
   render();
 }
 function exitSelection() {
@@ -343,7 +389,7 @@ function save(id, field, value) {
     if (!key) return;
     const op = await makeOp(key, actor, ++clock, id, field, value);
     await putOps(db, [{ ...op, localPending: true }]);
-    const note = notes.get(id) || { id, title: '', body: '', folder: '', pinned: false, deleted: false, background: 'paper', updatedAt: 0 };
+    const note = notes.get(id) || { id, title: '', body: '', folder: '', pinned: false, deleted: false, purged: false, kind: 'note', reminderAt: 0, background: 'paper', updatedAt: 0 };
     note[field] = value;
     notes.set(id, note);
     $('save-state').textContent = '已保存在本机';
@@ -366,6 +412,8 @@ async function changeNote(id, field, value) {
     }
     if (!String(value).trim()) return;
     draftId = null;
+    const kind = notes.get(id)?.kind;
+    if (kind && kind !== 'note') await save(id, 'kind', kind);
     const folder = notes.get(id)?.folder;
     if (folder && field !== 'folder') await save(id, 'folder', folder);
     const pinned = notes.get(id)?.pinned;
@@ -386,23 +434,81 @@ function createNote() {
   const id = crypto.randomUUID();
   discardDraft();
   draftId = id;
-  notes.set(id, { id, title: '', body: '', folder: ['all', 'pinned', 'trash'].includes(view) ? '' : view, pinned: false, deleted: false, background: 'paper', updatedAt: Date.now() });
+  notes.set(id, { id, title: '', body: '', folder: ['all', 'pinned', 'trash'].includes(view) ? '' : view, pinned: false, deleted: false, purged: false, kind: 'note', reminderAt: 0, background: 'paper', updatedAt: Date.now() });
   openEditor(id);
   $('note-title').focus();
 }
-async function createTodo() {
-  const text = prompt('待办内容')?.trim();
-  if (!text) return;
+function createMindmap() {
   const id = crypto.randomUUID();
-  await save(id, 'title', text);
-  await save(id, 'body', '- [ ] ' + text);
-  await save(id, 'updatedAt', Date.now());
+  discardDraft();
+  draftId = id;
+  notes.set(id, { id, title: '', body: '', folder: ['all', 'pinned', 'trash'].includes(view) ? '' : view, pinned: false, deleted: false, purged: false, kind: 'mindmap', reminderAt: 0, background: 'paper', updatedAt: Date.now() });
+  current = id;
+  openMindmapEditor(null, null, id, true);
 }
-function createForTab() { return tab === 'todos' ? createTodo() : createNote(); }
+function addTodoEditItem(item = { text: '', done: false }, after = null) {
+  const row = document.createElement('div');
+  row.className = 'todo-edit-row';
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.checked = item.done;
+  check.setAttribute('aria-label', '完成此项');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = item.text;
+  input.placeholder = '输入待办，回车添加下一项';
+  input.setAttribute('aria-label', '待办内容');
+  input.onkeydown = event => {
+    if (event.key === 'Enter') { event.preventDefault(); addTodoEditItem(undefined, row).querySelector('input[type=text]').focus(); }
+    else if (event.key === 'Backspace' && !input.value && $('todo-edit-items').children.length > 1) {
+      event.preventDefault();
+      const previous = row.previousElementSibling || row.nextElementSibling;
+      row.remove();
+      previous?.querySelector('input[type=text]')?.focus();
+    }
+  };
+  row.append(check, input);
+  if (after) after.after(row); else $('todo-edit-items').append(row);
+  return row;
+}
+function openTodoEditor(id = null) {
+  const note = id ? notes.get(id) : null;
+  editingTodoId = id;
+  $('todo-dialog-heading').textContent = note ? '编辑待办' : '新建待办';
+  $('todo-title').value = note?.title || '';
+  $('todo-edit-items').replaceChildren();
+  const items = note ? todoItems(note) : [];
+  for (const item of items.length ? items : [{ text: '', done: false }]) addTodoEditItem(item);
+  const when = note?.reminderAt || 0;
+  $('todo-reminder').value = when ? new Date(when - new Date(when).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
+  updateTodoDateText();
+  $('todo-delete').hidden = !note || note.deleted;
+  $('todo-restore').hidden = !note?.deleted;
+  $('todo-dialog').showModal();
+  updateTodoViewport();
+  $('todo-edit-items').querySelector('input[type=text]')?.focus();
+}
+function updateTodoDateText() {
+  const value = $('todo-reminder').value;
+  $('todo-date-text').textContent = value ? new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '设置日期';
+}
+async function purgeNote(id) {
+  if (!notes.get(id)?.deleted || notes.get(id)?.purged) return;
+  const body = notes.get(id).body;
+  const blobIds = [...body.matchAll(/surge-blob:([a-f0-9-]{36})/g)].map(match => match[1]).filter(blobId => ![...notes.values()].some(note => note.id !== id && !note.purged && note.body.includes(blobId)));
+  await changeNote(id, 'purged', true);
+  await pruneNote(db, id, blobIds);
+  notes.get(id).title = '';
+  notes.get(id).body = '';
+  render();
+}
+function createForTab() { if (tab === 'todos') openTodoEditor(); else $('new-type-dialog').showModal(); }
 function openEditor(id) {
   current = id;
   const note = notes.get(id);
   if (!note) return;
+  if (noteKind(note) === 'todo') { openTodoEditor(id); return; }
+  if (noteKind(note) === 'mindmap') { openMindmapEditor(null, null, id, true); return; }
   closeMobileNav();
   $('editor').hidden = false;
   $('editor').dataset.background = note.background || 'paper';
@@ -428,10 +534,18 @@ function updateEditorViewport() {
   $('editor').style.height = Math.min(viewport?.height || window.innerHeight, nativeVisibleHeight) + 'px';
   $('editor').style.top = (viewport?.offsetTop || 0) + 'px';
 }
+function updateTodoViewport() {
+  if (!$('todo-dialog').open) return;
+  const viewport = window.visualViewport;
+  const visible = Math.min(viewport?.height || window.innerHeight, nativeVisibleHeight);
+  $('todo-dialog').style.bottom = Math.max(0, window.innerHeight - visible - (viewport?.offsetTop || 0)) + 'px';
+  $('todo-dialog').style.maxHeight = Math.min(visible, 760) + 'px';
+}
 window.surgeSetVisibleHeight = height => {
   nativeVisibleHeight = Number.isFinite(height) && height > 0 ? height : Infinity;
   updateEditorViewport();
   updateMindmapViewport();
+  updateTodoViewport();
 };
 async function sync() {
   if (syncing || !server || !token || !key) return;
@@ -452,8 +566,14 @@ async function sync() {
     const known = new Set(latest.map(op => op.id));
     const fresh = result.ops.filter(op => !known.has(op.id));
     const nextState = fresh.length ? await materialize([...latest, ...fresh], key) : null;
+    const purgedIds = new Set(nextState ? [...nextState.notes.values()].filter(note => note.purged).map(note => note.id) : []);
+    const oldBodies = new Map([...notes.values()].filter(note => purgedIds.has(note.id)).map(note => [note.id, note.body]));
     if (pending.length) await putOps(db, pending.map(op => ({ ...op, localPending: false })));
-    if (fresh.length) await putOps(db, fresh);
+    if (fresh.length) await putOps(db, fresh.filter(op => !purgedIds.has(op.noteId) || op.field === 'purged'));
+    for (const id of purgedIds) {
+      const blobIds = [...(oldBodies.get(id) || '').matchAll(/surge-blob:([a-f0-9-]{36})/g)].map(match => match[1]).filter(blobId => ![...notes.values()].some(note => note.id !== id && !note.purged && note.body.includes(blobId)));
+      await pruneNote(db, id, blobIds);
+    }
     cursor = result.cursor;
     await putMeta(db, 'cursor', cursor);
     if (nextState) {
@@ -908,6 +1028,15 @@ function outlineToSvg(items) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="white"/>${edges}${boxes}</svg>`;
 }
 let mindmapItems = [], mindmapTarget = null, mindmapActive = 0, mindmapMode = 'outline';
+function outlineFromMindNote(note) {
+  const items = [{ depth: 0, text: note?.title || '' }];
+  for (const line of (note?.body || '').split('\n')) {
+    const match = /^( *)(?:- )(.+)$/.exec(line);
+    if (match) items.push({ depth: Math.max(1, Math.min(4, 1 + Math.floor(match[1].length / 2))), text: match[2] });
+  }
+  return items;
+}
+const mindNoteBody = items => items.slice(1).filter(item => item.text.trim()).map(item => `${'  '.repeat(Math.max(0, item.depth - 1))}- ${item.text.trim()}`).join('\n');
 const mapViewIcon = '<svg viewBox="0 0 24 24"><circle cx="4" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M6 12h7V5h4m-4 7v7h4"/></svg>';
 const outlineViewIcon = '<svg viewBox="0 0 24 24"><path d="M5 5h15M5 12h15M5 19h15"/><circle cx="2" cy="5" r=".5"/><circle cx="2" cy="12" r=".5"/><circle cx="2" cy="19" r=".5"/></svg>';
 function updateMindmapViewport() {
@@ -986,18 +1115,38 @@ function deleteMindmapItem(index) {
   if (mindmapMode === 'map') renderMindmapGraph();
   else renderMindmapItems(mindmapActive);
 }
-function renderMindmapGraph() {
+function renderMindmapGraph(center = false) {
+  const view = $('mindmap-map-view');
   const nodes = mindmapItems.map((item, index) => {
     const depth = index ? Math.max(1, item.depth) : 0;
     let parent = -1;
     for (let i = index - 1; i >= 0; i--) if (mindmapItems[i].depth < depth) { parent = i; break; }
-    return { index, x: 28 + depth * 190, y: 28 + index * 72, parent, text: item.text || (index ? '新主题' : '中心主题') };
+    return { index, depth, parent, text: item.text || (index ? '新主题' : '中心主题'), branch: 0, side: 0, x: 0, y: 0 };
   });
-  const width = Math.max(390, ...nodes.map(node => node.x + 180));
-  const height = Math.max(280, ...nodes.map(node => node.y + 80));
+  let branches = 0;
+  for (const node of nodes.slice(1)) {
+    node.branch = node.parent === 0 ? branches++ : nodes[node.parent]?.branch || 0;
+    node.side = node.branch % 2 === 0 ? -1 : 1;
+  }
+  const left = nodes.filter(node => node.side === -1);
+  const right = nodes.filter(node => node.side === 1);
+  const depth = Math.max(1, ...nodes.map(node => node.depth));
+  const compact = view.clientWidth < 600;
+  const nodeWidth = compact ? 98 : 144;
+  const step = compact ? 126 : 180;
+  const width = Math.max(view.clientWidth + (compact ? 60 : 280), nodeWidth + depth * step * 2 + 60);
+  const height = Math.max(view.clientHeight + 140, 240 + Math.max(left.length, right.length) * 72);
+  const rootX = width / 2 - nodeWidth / 2;
+  const rootY = height / 2 - 24;
+  nodes[0].x = rootX; nodes[0].y = rootY;
+  for (const sideNodes of [left, right]) sideNodes.forEach((node, position) => {
+    node.x = rootX + node.side * node.depth * step;
+    node.y = rootY + (position - (sideNodes.length - 1) / 2) * 72;
+  });
   const scene = $('mindmap-map-scene');
   scene.style.width = width + 'px';
   scene.style.height = height + 'px';
+  scene.style.setProperty('--map-node-width', nodeWidth + 'px');
   const lines = $('mindmap-map-lines');
   lines.setAttribute('viewBox', `0 0 ${width} ${height}`);
   lines.setAttribute('width', width);
@@ -1005,7 +1154,10 @@ function renderMindmapGraph() {
   lines.replaceChildren(...nodes.filter(node => node.parent >= 0).map(node => {
     const parent = nodes[node.parent];
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', `M${parent.x + 160} ${parent.y + 24} H${node.x - 20} V${node.y + 24} H${node.x}`);
+    const fromX = node.side < 0 ? parent.x : parent.x + nodeWidth;
+    const toX = node.side < 0 ? node.x + nodeWidth : node.x;
+    const middle = (fromX + toX) / 2;
+    path.setAttribute('d', `M${fromX} ${parent.y + 24} H${middle} V${node.y + 24} H${toX}`);
     return path;
   }));
   $('mindmap-map-nodes').replaceChildren(...nodes.map(node => {
@@ -1018,10 +1170,38 @@ function renderMindmapGraph() {
     button.textContent = node.text;
     button.setAttribute('aria-label', `${node.index ? '主题' : '中心主题'}：${node.text}`);
     button.onclick = () => { mindmapActive = node.index; renderMindmapGraph(); };
+    button.ondblclick = () => { mindmapActive = node.index; renderMindmapGraph(); editMindmapGraphNode(); };
     return button;
   }));
+  const active = nodes[mindmapActive];
+  if (active) {
+    const actions = document.createElement('div');
+    actions.className = 'mindmap-node-actions';
+    actions.style.left = Math.max(12, active.x - 42) + 'px';
+    actions.style.top = Math.max(12, active.y - 55) + 'px';
+    const add = document.createElement('button'); add.textContent = '添加子主题'; add.onclick = () => addMindmapItem(mindmapActive, true);
+    const edit = document.createElement('button'); edit.textContent = '编辑'; edit.onclick = editMindmapGraphNode;
+    actions.append(add, edit);
+    if (mindmapActive > 0) {
+      const remove = document.createElement('button'); remove.textContent = '删除'; remove.onclick = () => deleteMindmapItem(mindmapActive);
+      actions.append(remove);
+    }
+    $('mindmap-map-nodes').append(actions);
+    const plus = document.createElement('button');
+    plus.className = 'mindmap-inline-add';
+    plus.style.left = (active.side < 0 ? active.x - 28 : active.x + nodeWidth + 6) + 'px';
+    plus.style.top = (active.y + 12) + 'px';
+    plus.textContent = '+';
+    plus.setAttribute('aria-label', '添加子主题');
+    plus.onclick = () => addMindmapItem(mindmapActive, true);
+    $('mindmap-map-nodes').append(plus);
+  }
   $('mindmap-map-sibling').disabled = mindmapActive === 0;
   $('mindmap-delete-node').disabled = mindmapActive === 0;
+  if (center) {
+    view.scrollLeft = Math.max(0, (width - view.clientWidth) / 2);
+    view.scrollTop = Math.max(0, (height - view.clientHeight) / 2);
+  }
 }
 function editMindmapGraphNode() {
   const button = $('mindmap-map-nodes').querySelector(`[data-index="${mindmapActive}"]`);
@@ -1059,17 +1239,27 @@ function setMindmapMode(mode) {
   if (map) { document.activeElement?.blur(); renderMindmapGraph(); }
   else renderMindmapItems();
 }
-function openMindmapEditor(payload = null, card = null, noteId = current) {
+function openMindmapEditor(payload = null, card = null, noteId = current, standalone = false) {
   if (!noteId) return;
-  mindmapTarget = card ? { card, noteId, payload } : null;
-  mindmapItems = payload?.outline?.length ? payload.outline.map(item => ({ depth: Number(item.depth) || 0, text: String(item.text || '') })) : [{ depth: 0, text: '' }];
+  mindmapTarget = standalone ? { noteId, standalone: true } : card ? { card, noteId, payload } : null;
+  mindmapItems = standalone ? outlineFromMindNote(notes.get(noteId)) : payload?.outline?.length ? payload.outline.map(item => ({ depth: Number(item.depth) || 0, text: String(item.text || '') })) : [{ depth: 0, text: '' }];
   mindmapItems[0].depth = 0;
   for (let i = 1; i < mindmapItems.length; i++) mindmapItems[i].depth = Math.max(1, Math.min(4, mindmapItems[i - 1].depth + 1, mindmapItems[i].depth));
   mindmapActive = 0;
-  setMindmapMode('outline');
+  setMindmapMode(standalone ? 'map' : 'outline');
+  const note = notes.get(noteId);
+  $('mindmap-more').hidden = !standalone || draftId === noteId;
+  $('mindmap-more-menu').hidden = true;
+  $('mindmap-pin-note').textContent = note?.pinned ? '取消置顶' : '置顶';
+  $('mindmap-delete-note').hidden = !!note?.deleted;
+  $('mindmap-restore-note').hidden = !note?.deleted;
+  $('mindmap-map-view').tabIndex = -1;
+  if (standalone) $('mindmap-map-view').setAttribute('autofocus', '');
+  else $('mindmap-map-view').removeAttribute('autofocus');
   $('mindmap-dialog').showModal();
   updateMindmapViewport();
-  focusMindmap(0);
+  if (standalone) { renderMindmapGraph(true); $('mindmap-map-view').tabIndex = -1; $('mindmap-map-view').focus({ preventScroll: true }); }
+  else focusMindmap(0);
 }
 async function showHistory() {
   if (!current) return;
@@ -1150,6 +1340,36 @@ window.surgeHandleBack = () => {
 };
 $('new-note').onclick = createForTab;
 $('fab').onclick = createForTab;
+$('new-text-note').onclick = () => { $('new-type-dialog').close(); createNote(); };
+$('new-mind-note').onclick = () => { $('new-type-dialog').close(); createMindmap(); };
+$('new-type-cancel').onclick = () => $('new-type-dialog').close();
+$('clear-trash').onclick = async () => {
+  const ids = [...notes.values()].filter(note => note.deleted && !note.purged && !isFolderRecord(note)).map(note => note.id);
+  if (!ids.length || !confirm(`清空回收站中的 ${ids.length} 项？`)) return;
+  for (const id of ids) await purgeNote(id);
+  render();
+};
+$('todo-close').onclick = () => $('todo-dialog').close();
+$('todo-reminder').onchange = updateTodoDateText;
+$('todo-add-item').onclick = () => addTodoEditItem().querySelector('input[type=text]').focus();
+$('todo-done').onclick = async () => {
+  const items = [...$('todo-edit-items').children].map(row => ({ done: row.querySelector('input[type=checkbox]').checked, text: row.querySelector('input[type=text]').value.trim() })).filter(item => item.text);
+  const title = $('todo-title').value.trim() || items[0]?.text || '';
+  if (!title) { $('todo-dialog').close(); return; }
+  const id = editingTodoId || crypto.randomUUID();
+  const when = $('todo-reminder').value ? new Date($('todo-reminder').value).getTime() : 0;
+  if (noteKind(notes.get(id) || {}) !== 'todo' || !editingTodoId) await save(id, 'kind', 'todo');
+  if (notes.get(id)?.title !== title) await changeNote(id, 'title', title);
+  const body = todoBody(items);
+  if (notes.get(id)?.body !== body) await changeNote(id, 'body', body);
+  if ((notes.get(id)?.reminderAt || 0) !== when) await changeNote(id, 'reminderAt', when);
+  if (!notes.get(id)?.updatedAt) await changeNote(id, 'updatedAt', Date.now());
+  todoExpanded.add(id);
+  $('todo-dialog').close();
+  render();
+};
+$('todo-delete').onclick = async () => { if (editingTodoId) await changeNote(editingTodoId, 'deleted', true); $('todo-dialog').close(); };
+$('todo-restore').onclick = async () => { if (editingTodoId) await changeNote(editingTodoId, 'deleted', false); $('todo-dialog').close(); };
 $('back').onclick = () => { discardDraft(); $('editor').hidden = true; current = null; render(); };
 $('batch-cancel').onclick = () => { exitSelection(); render(); };
 $('batch-pin').onclick = async () => {
@@ -1381,6 +1601,23 @@ $('image-from-album').onclick = () => { $('image-source-dialog').close(); $('pic
 $('image-from-camera').onclick = () => { $('image-source-dialog').close(); $('pick-camera').click(); };
 $('image-source-cancel').onclick = () => $('image-source-dialog').close();
 $('mindmap-cancel').onclick = () => $('mindmap-dialog').close();
+$('mindmap-more').onclick = () => $('mindmap-more-menu').hidden = !$('mindmap-more-menu').hidden;
+$('mindmap-history-note').onclick = () => { $('mindmap-dialog').close(); showHistory(); };
+$('mindmap-pin-note').onclick = async () => {
+  if (!current) return;
+  await changeNote(current, 'pinned', !notes.get(current).pinned);
+  $('mindmap-pin-note').textContent = notes.get(current).pinned ? '取消置顶' : '置顶';
+  $('mindmap-more-menu').hidden = true;
+};
+$('mindmap-move-note').onclick = () => { $('mindmap-more-menu').hidden = true; openMoveDialog([current]); };
+$('mindmap-delete-note').onclick = async () => {
+  if (current) await changeNote(current, 'deleted', true);
+  $('mindmap-dialog').close(); current = null; render();
+};
+$('mindmap-restore-note').onclick = async () => {
+  if (current) await changeNote(current, 'deleted', false);
+  $('mindmap-dialog').close(); current = null; render();
+};
 $('mindmap-add').onclick = () => addMindmapItem(mindmapActive, mindmapActive === 0);
 $('mindmap-add-sibling').onclick = () => addMindmapItem(mindmapActive);
 $('mindmap-add-child').onclick = () => addMindmapItem(mindmapActive, true);
@@ -1394,6 +1631,17 @@ $('mindmap-delete-node').onclick = () => deleteMindmapItem(mindmapActive);
 $('mindmap-save').onclick = async () => {
   if (!mindmapItems[0]?.text.trim()) { toast('输入中心主题'); return; }
   const outline = mindmapItems.filter(item => item.text.trim()).map((item, index) => ({ depth: index ? Math.max(1, item.depth) : 0, text: item.text.trim() }));
+  if (mindmapTarget?.standalone) {
+    const id = mindmapTarget.noteId;
+    if (notes.get(id)?.title !== outline[0].text) await changeNote(id, 'title', outline[0].text);
+    const body = mindNoteBody(outline);
+    if (notes.get(id)?.body !== body) await changeNote(id, 'body', body);
+    $('mindmap-dialog').close();
+    mindmapTarget = null;
+    current = null;
+    render();
+    return;
+  }
   const data = bytesToUrl(new TextEncoder().encode(outlineToSvg(outline)));
   const payload = { kind: 'mindmap', name: '思维导图.svg', mime: 'image/svg+xml', data, outline, caption: mindmapTarget?.payload?.caption || '', scale: mindmapTarget?.payload?.scale || 1 };
   $('mindmap-dialog').close();
@@ -1401,6 +1649,10 @@ $('mindmap-save').onclick = async () => {
   else await storePayload(payload, mindmapTarget?.noteId || current);
   mindmapTarget = null;
 };
+$('mindmap-dialog').addEventListener('close', () => {
+  if (mindmapTarget?.standalone && draftId === mindmapTarget.noteId) { discardDraft(); current = null; render(); }
+  mindmapTarget = null;
+});
 const canvas = $('drawing-canvas');
 const context = canvas.getContext('2d');
 let drawing = false, drawingTool = 'pencil', drawingTarget = null, drawingHistory = [], drawingHistoryIndex = -1, drawingRestoring = false;
@@ -1579,8 +1831,8 @@ $('record-cancel').onclick = () => {
   $('record-dialog').close();
 };
 $('record-pick').onclick = () => { $('record-dialog').close(); $('pick-audio').click(); };
-window.visualViewport?.addEventListener('resize', () => { updateEditorViewport(); updateMindmapViewport(); });
-window.visualViewport?.addEventListener('scroll', () => { updateEditorViewport(); updateMindmapViewport(); });
+window.visualViewport?.addEventListener('resize', () => { updateEditorViewport(); updateMindmapViewport(); updateTodoViewport(); });
+window.visualViewport?.addEventListener('scroll', () => { updateEditorViewport(); updateMindmapViewport(); updateTodoViewport(); });
 window.addEventListener('online', sync);
 window.addEventListener('popstate', () => { $('settings-panel').hidden = true; });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });

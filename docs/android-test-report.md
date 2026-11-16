@@ -1,14 +1,14 @@
 # Android 构建与模拟器测试
 
-首次测试：2026-11-14；最近回归：2026-11-15。主机：Apple Silicon macOS。Android 虚拟设备：Pixel 6、Android 15（API 35，Google APIs，ARM64）。
+首次测试：2026-11-14；最近回归：2026-11-16。主机：Apple Silicon macOS。Android 虚拟设备：Pixel 6、Android 15（API 35，Google APIs，ARM64）。
 
 ## 构建与交付物
 
-- 真机测试包：[surge-android-device-test.apk](https://github.com/yzxcxy/Surge/releases/download/v1.1.0/surge-android-device-test.apk)，由 `assembleRelease` 的未签名 APK 对齐后，以独立的本机测试密钥签名。包名 `org.surge.notes`，`versionCode=2`、`versionName=1.1.0`，最低 Android 6.0（API 23），目标 API 35。SHA-256：`4b267c6d3946af9191f12cd2634eabfb89b54b9f8a9dad54e5ef82dcb33daba4`；签名证书 SHA-256：`9acac77ddfd6bc6e545744b9eeb612a3c0b1a3700d0eea7f3baf80f968ff2345`。`zipalign -c` 和 `apksigner verify` 均通过（v1、v2、v3）。签名密钥保存在本机 `~/.local/share/surge/signing/`，未纳入项目或 APK；后续覆盖安装需使用同一密钥。
+- 真机测试包：[surge-android-device-test.apk](https://github.com/yzxcxy/Surge/releases/download/v1.1.1/surge-android-device-test.apk)，由 `assembleRelease` 的未签名 APK 对齐后，以独立的本机测试密钥签名。包名 `org.surge.notes`，`versionCode=3`、`versionName=1.1.1`，最低 Android 6.0（API 23），目标 API 35。SHA-256：`882514644a39141863efe90e43e49ae875be46c8429b0a429036e5e83d182726`；签名证书 SHA-256：`9acac77ddfd6bc6e545744b9eeb612a3c0b1a3700d0eea7f3baf80f968ff2345`。`zipalign -c` 和 `apksigner verify` 均通过（v1、v2、v3）。签名密钥保存在本机 `~/.local/share/surge/signing/`，未纳入项目或 APK；后续覆盖安装需使用同一密钥。
 - 上述真机包没有调试构建的自签 CA 信任配置；尚未在用户的实体设备上测试。若设备已装相同包名的调试签名版本，Android 不允许直接覆盖安装。
 - Docker Compose 服务 `surge-surge-1` 在 `8787` 端口运行，`GET /api/health` 返回 `{"ok":true}`；重启容器后随机盐值保持一致。测试结束时，正式 Docker 卷的操作日志游标仍为 0。
 - 安装 OpenJDK 21、Android SDK 平台 35、Build Tools 35、Platform Tools 和 Emulator，并执行 `npm run android:sync` 与 `./gradlew assembleDebug --no-daemon`，构建成功。
-- 调试包位于本机 `dist/surge-android-debug.apk`，包名 `org.surge.notes`，大小约 5.0 MiB；本次 SHA-256：`6c692f4aaba3f42bd5b778e40e5220219f0e079d877063374826b5906be8c782`。
+- 调试包位于本机 `dist/surge-android-debug.apk`，包名 `org.surge.notes`，大小约 5.0 MiB；本次 SHA-256：`d0da2cd42a0cea8da3b7dc8bfe19cded0aa4e1664c68c3d11f4f546640e8191d`。
 - `npm test` 通过，覆盖加密操作、离线修改收敛、操作去重、鉴权、加密附件及服务端重启持久化。
 - Obsidian 插件的 `npx tsc --noEmit` 和 `npm run build` 通过。
 
@@ -66,3 +66,7 @@
 模拟器集成测试使用临时自签 CA。公开证书仅放在 `android/app/src/debug/res/raw/`，私钥留在主机临时目录。`android/app/src/debug/AndroidManifest.xml` 为调试构建配置 CA 信任；运行 `:app:processReleaseManifest` 后，release 合并清单没有此信任配置。这个 APK 是调试包，不应作为正式发行包。Android 官方文档对 `debug-overrides` 的定义见 [Network security configuration](https://developer.android.com/privacy-and-security/security-config)。
 
 后续还需在实体 Android 设备和实际公网 HTTPS 部署上验证；本报告的网络与重启结论来自上述模拟器及本机服务。
+
+## 2026-11-16 版本 1.1.1
+
+重新打包并用相同的本机签名密钥签署 Android 包，`versionCode=3`。版本 1.1.1 的 GitHub 标签与应用源码对应，更新检查保留 GitHub API 限流时的公开版本清单备用来源。`npm test` 6 项、本机 Android debug/release 构建和签名校验均通过。

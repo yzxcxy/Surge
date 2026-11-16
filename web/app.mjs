@@ -642,7 +642,11 @@ function leaveStructuredBlock(item, preserveContent = false) {
   while (item.nextSibling) following.append(item.nextSibling);
   const paragraph = document.createElement('p');
   if (preserveContent) {
-    item.querySelector(':scope > input[type="checkbox"]')?.remove();
+    const checkbox = item.querySelector(':scope > input[type="checkbox"]');
+    if (checkbox) {
+      checkbox.remove();
+      if (item.firstChild?.nodeType === Node.TEXT_NODE && /^[\u00a0 ]/.test(item.firstChild.textContent)) item.firstChild.textContent = item.firstChild.textContent.slice(1);
+    }
     while (item.firstChild) paragraph.append(item.firstChild);
   }
   container.after(paragraph);

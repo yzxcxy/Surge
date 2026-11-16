@@ -582,6 +582,8 @@ function toast(message) {
 }
 function editorRange() {
   const body = $('note-body');
+  const selection = window.getSelection();
+  if (selection?.rangeCount && body.contains(selection.getRangeAt(0).commonAncestorContainer)) return selection.getRangeAt(0).cloneRange();
   const range = bodyRange?.cloneRange();
   if (range && body.contains(range.commonAncestorContainer)) return range;
   const end = document.createRange();
@@ -598,17 +600,6 @@ function focusRange(range = editorRange()) {
 }
 function saveEditorBody() {
   if (current) return changeNote(current, 'body', serializeMarkdown($('note-body')));
-}
-function insertText(value) {
-  if (!current) return;
-  const range = editorRange();
-  range.deleteContents();
-  const node = document.createTextNode(value);
-  range.insertNode(node);
-  range.setStartAfter(node);
-  range.collapse(true);
-  focusRange(range);
-  saveEditorBody();
 }
 function insertBlock(node) {
   if (!current) return;
@@ -639,54 +630,142 @@ function insertTask() {
   list.append(item);
   insertBlock(list);
 }
-function continueTask(event) {
+function focusIn(node, atStart = false) {
+  const caret = document.createRange();
+  caret.selectNodeContents(node);
+  caret.collapse(atStart);
+  focusRange(caret);
+}
+function leaveStructuredBlock(item, preserveContent = false) {
+  const container = item.parentElement;
+  const following = container.cloneNode(false);
+  while (item.nextSibling) following.append(item.nextSibling);
+  const paragraph = document.createElement('p');
+  if (preserveContent) {
+    item.querySelector(':scope > input[type="checkbox"]')?.remove();
+    while (item.firstChild) paragraph.append(item.firstChild);
+  }
+  container.after(paragraph);
+  if (following.childNodes.length) paragraph.after(following);
+  item.remove();
+  if (!container.childNodes.length) container.remove();
+  focusIn(paragraph, preserveContent);
+  saveEditorBody();
+}
+function handleStructuredEdit(event, action) {
   if (composingBody || event.isComposing || event.target.closest('input')) return;
   const selection = window.getSelection();
   if (!selection?.rangeCount || !selection.isCollapsed) return;
   const range = selection.getRangeAt(0);
   const node = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
-  const item = node?.closest('li');
-  const existingCheckbox = item?.querySelector(':scope > input[type="checkbox"]');
-  if (!item || !$('note-body').contains(item) || !item.parentElement?.matches('ul, ol') || !existingCheckbox) return;
+  const item = node?.closest('li, blockquote > p');
+  const container = item?.parentElement;
+  if (!item || !$('note-body').contains(item) || !container?.matches('ul, ol, blockquote')) return;
+  const checkbox = item.querySelector(':scope > input[type="checkbox"]');
+  const empty = !(item.textContent || '').replace(/\u00a0|\u200b/g, '').trim();
+  const before = document.createRange();
+  before.selectNodeContents(item);
+  before.setEnd(range.startContainer, range.startOffset);
+  const atStart = !(before.toString() || '').replace(/\u00a0|\u200b/g, '').trim();
+  if (action === 'backspace') {
+    if (!atStart) return;
+    event.preventDefault();
+    if (empty && item.previousElementSibling) {
+      const previous = item.previousElementSibling;
+      item.remove();
+      focusIn(previous);
+      saveEditorBody();
+    } else leaveStructuredBlock(item, !empty);
+    return;
+  }
+  if (empty) {
+    event.preventDefault();
+    leaveStructuredBlock(item);
+    return;
+  }
   event.preventDefault();
   const tail = document.createRange();
   tail.selectNodeContents(item);
-  if (range.startContainer === item && range.startOffset === 0) tail.setStartAfter(existingCheckbox);
+  if (checkbox && range.startContainer === item && range.startOffset === 0) tail.setStartAfter(checkbox);
   else tail.setStart(range.startContainer, range.startOffset);
   const remainder = tail.extractContents();
-  const next = document.createElement('li');
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox';
-  checkbox.contentEditable = 'false';
-  const spacer = document.createTextNode('\u00a0');
-  next.append(checkbox, spacer, remainder);
+  const next = document.createElement(item.tagName.toLowerCase());
+  if (checkbox) {
+    const nextCheckbox = document.createElement('input');
+    nextCheckbox.type = 'checkbox';
+    nextCheckbox.contentEditable = 'false';
+    next.append(nextCheckbox, document.createTextNode('\u00a0'));
+  }
+  next.append(remainder);
   item.after(next);
-  const caret = document.createRange();
-  caret.setStart(spacer, spacer.length);
-  caret.collapse(true);
-  focusRange(caret);
+  if (checkbox) {
+    const spacer = next.childNodes[1];
+    const caret = document.createRange();
+    caret.setStart(spacer, spacer.length);
+    caret.collapse(true);
+    focusRange(caret);
+  } else focusIn(next, true);
   saveEditorBody();
 }
 function applyFormat(kind) {
   if (!current) return;
-  if (kind === 'bold' || kind === 'italic') {
+  if (['bold', 'italic', 'underline', 'strike'].includes(kind)) {
     focusRange();
-    document.execCommand(kind === 'bold' ? 'bold' : 'italic');
+    document.execCommand(kind === 'strike' ? 'strikeThrough' : kind);
     saveEditorBody();
     return;
   }
   const body = $('note-body');
   const range = editorRange();
-  let block = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+  const origin = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+  let item = origin?.closest('li, blockquote > p');
+  let block = origin;
   while (block && block.parentElement !== body) block = block.parentElement;
   if (!block || block.matches('.rich-attachment, table')) return;
-  const next = document.createElement(kind === 'list' ? 'ul' : kind === 'quote' ? 'blockquote' : kind);
-  const target = kind === 'list' ? document.createElement('li') : next;
-  while (block.firstChild) target.append(block.firstChild);
-  if (kind === 'list') next.append(target);
-  block.replaceWith(next);
-  const caret = document.createRange();
-  caret.selectNodeContents(target); caret.collapse(false); focusRange(caret);
+  if (kind.startsWith('align-')) {
+    const target = item?.matches('blockquote > p') ? item : block;
+    if (!target.matches('p, h1, h2, h3, h4, h5, h6')) return;
+    if (kind === 'align-left') delete target.dataset.align;
+    else target.dataset.align = kind.slice(6);
+    focusIn(target);
+  } else if (kind === 'divider') {
+    const divider = document.createElement('hr');
+    const paragraph = document.createElement('p');
+    block.after(divider, paragraph);
+    focusIn(paragraph);
+  } else if (kind === 'quote') {
+    if (item?.matches('blockquote > p')) { leaveStructuredBlock(item, true); return; }
+    if (item?.matches('li')) { leaveStructuredBlock(item, true); return; }
+    const quote = document.createElement('blockquote');
+    const paragraph = document.createElement('p');
+    while (block.firstChild) paragraph.append(block.firstChild);
+    quote.append(paragraph);
+    block.replaceWith(quote);
+    focusIn(paragraph);
+  } else if (kind === 'unordered' || kind === 'ordered') {
+    const tag = kind === 'ordered' ? 'ol' : 'ul';
+    if (item?.matches('li')) {
+      if (item.parentElement.tagName.toLowerCase() === tag) { leaveStructuredBlock(item, true); return; }
+      const replacement = document.createElement(tag);
+      while (block.firstChild) replacement.append(block.firstChild);
+      block.replaceWith(replacement);
+      focusIn(item);
+    } else {
+      if (item?.matches('blockquote > p')) { leaveStructuredBlock(item, true); return; }
+      const list = document.createElement(tag);
+      const listItem = document.createElement('li');
+      while (block.firstChild) listItem.append(block.firstChild);
+      list.append(listItem);
+      block.replaceWith(list);
+      focusIn(listItem);
+    }
+  } else if (/^h[1-6]$/.test(kind)) {
+    if (item) { leaveStructuredBlock(item, true); return; }
+    const heading = document.createElement(block.tagName.toLowerCase() === kind ? 'p' : kind);
+    while (block.firstChild) heading.append(block.firstChild);
+    block.replaceWith(heading);
+    focusIn(heading);
+  }
   saveEditorBody();
 }
 async function payloadFor(id) {
@@ -1230,8 +1309,10 @@ function applyMarkdownShortcut() {
   const heading = /^(#{1,6}) $/.exec(value);
   if (heading || value === '> ') {
     const replacement = document.createElement(heading ? `h${heading[1].length}` : 'blockquote');
+    const target = heading ? replacement : document.createElement('p');
+    if (!heading) replacement.append(target);
     block.replaceWith(replacement);
-    placeCaret(replacement);
+    placeCaret(target);
     return true;
   }
   if (/(?:\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))$/.test(value)) {
@@ -1245,8 +1326,14 @@ $('note-title').addEventListener('compositionstart', () => { composingTitle = tr
 $('note-title').addEventListener('compositionend', event => { composingTitle = false; if (current) changeNote(current, 'title', event.target.value); });
 $('note-body').addEventListener('compositionstart', () => { composingBody = true; });
 $('note-body').addEventListener('compositionend', () => { composingBody = false; applyMarkdownShortcut(); saveEditorBody(); });
-$('note-body').addEventListener('keydown', event => { if (event.key === 'Enter') continueTask(event); });
-$('note-body').addEventListener('beforeinput', event => { if (['insertParagraph', 'insertLineBreak'].includes(event.inputType)) continueTask(event); });
+$('note-body').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey) handleStructuredEdit(event, 'enter');
+  else if (event.key === 'Backspace') handleStructuredEdit(event, 'backspace');
+});
+$('note-body').addEventListener('beforeinput', event => {
+  if (event.inputType === 'insertParagraph') handleStructuredEdit(event, 'enter');
+  else if (event.inputType === 'deleteContentBackward') handleStructuredEdit(event, 'backspace');
+});
 document.addEventListener('selectionchange', () => {
   const selection = window.getSelection();
   if (selection.rangeCount && $('note-body').contains(selection.anchorNode)) bodyRange = selection.getRangeAt(0).cloneRange();
@@ -1285,31 +1372,10 @@ document.querySelectorAll('[data-insert]').forEach(button => button.onclick = ()
   else if (action === 'audio') $('record-dialog').showModal();
   else if (action === 'drawing') openDrawingEditor();
   else if (action === 'mindmap') openMindmapEditor();
-  else if (action === 'emoji') { $('emoji-search').value = ''; renderEmojis(); $('emoji-dialog').showModal(); $('emoji-search').focus(); }
 });
 $('image-from-album').onclick = () => { $('image-source-dialog').close(); $('pick-image').click(); };
 $('image-from-camera').onclick = () => { $('image-source-dialog').close(); $('pick-camera').click(); };
 $('image-source-cancel').onclick = () => $('image-source-dialog').close();
-const emojis = [
-  ['😀','开心 笑脸'],['😄','大笑 开心'],['😊','微笑 温暖'],['🥹','感动'],['😂','笑哭'],['🤣','爆笑'],['😅','尴尬'],['🥰','喜欢 爱'],['😍','心动'],['😘','亲亲'],['😎','酷'],['🤔','思考'],['😮','惊讶'],['🥲','苦笑'],['😢','难过'],['😭','大哭'],['😤','生气'],['😴','睡觉'],['🤒','生病'],['🥳','庆祝'],['🤗','拥抱'],['🫠','融化'],['🙃','无奈'],['😇','天使'],
-  ['👍','赞 好'],['👎','不赞'],['👏','鼓掌'],['🙌','万岁'],['👌','可以'],['✌️','胜利'],['🤞','好运'],['🙏','谢谢 拜托'],['💪','加油 力量'],['👀','看'],['🫶','爱心'],['👋','你好 再见'],
-  ['❤️','爱心 红心'],['🧡','橙心'],['💛','黄心'],['💚','绿心'],['💙','蓝心'],['💜','紫心'],['💔','心碎'],['✨','闪亮'],['⭐','星星'],['🌟','发光'],['🔥','火 热门'],['🎉','庆祝'],['🎂','生日 蛋糕'],['🎁','礼物'],['🌸','花'],['🌿','植物'],['🌈','彩虹'],['☀️','太阳'],['🌙','月亮'],['☁️','云'],['☔','雨'],['❄️','雪'],
-  ['✅','完成 对'],['❌','错误 不'],['⚠️','提醒 警告'],['❗','注意'],['❓','问题'],['💡','想法 灵感'],['📌','置顶 标记'],['📅','日期 日历'],['📝','笔记 记录'],['📚','学习 书'],['📷','拍照 图片'],['🎵','音乐'],['🎧','耳机'],['📍','地点'],['💬','聊天'],['🔒','锁 隐私'],['🔔','提醒'],['⏰','时间 闹钟'],['🚀','进步 出发'],['☕','咖啡'],['🍵','茶'],['🍎','苹果'],['🍜','面条'],['🏠','家'],['🚗','车']
-];
-function renderEmojis() {
-  const query = $('emoji-search').value.trim().toLowerCase();
-  $('emoji-grid').replaceChildren(...emojis.filter(([emoji, words]) => !query || emoji.includes(query) || words.toLowerCase().includes(query)).map(([emoji, words]) => {
-    const button = document.createElement('button');
-    button.textContent = emoji;
-    button.title = words.split(' ')[0];
-    button.setAttribute('aria-label', words.split(' ')[0]);
-    button.onclick = () => { $('emoji-dialog').close(); insertText(emoji); };
-    return button;
-  }));
-}
-$('emoji-search').oninput = renderEmojis;
-renderEmojis();
-$('emoji-close').onclick = () => $('emoji-dialog').close();
 $('mindmap-cancel').onclick = () => $('mindmap-dialog').close();
 $('mindmap-add').onclick = () => addMindmapItem(mindmapActive, mindmapActive === 0);
 $('mindmap-add-sibling').onclick = () => addMindmapItem(mindmapActive);

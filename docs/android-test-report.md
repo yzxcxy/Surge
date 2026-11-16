@@ -4,7 +4,7 @@
 
 ## 构建与交付物
 
-- 真机测试包：[surge-android-device-test.apk](https://github.com/yzxcxy/Surge/releases/download/v1.3.0/surge-android-device-test.apk)，由 `assembleRelease` 的未签名 APK 对齐后，以独立的本机测试密钥签名。包名 `org.surge.notes`，`versionCode=6`、`versionName=1.3.0`，最低 Android 6.0（API 23），目标 API 35。SHA-256：`895a0134c1421ed380270f7799fe9196082c52fe79ab2b2ded3dac247b434d93`；签名证书 SHA-256：`9acac77ddfd6bc6e545744b9eeb612a3c0b1a3700d0eea7f3baf80f968ff2345`。`zipalign -c` 和 `apksigner verify` 均通过（v1、v2、v3）。签名密钥保存在本机 `~/.local/share/surge/signing/`，未纳入项目或 APK；后续覆盖安装需使用同一密钥。
+- 真机测试包：[surge-android-device-test.apk](https://github.com/yzxcxy/Surge/releases/download/v1.4.0/surge-android-device-test.apk)，由 `assembleRelease` 的未签名 APK 对齐后，以独立的本机测试密钥签名。包名 `org.surge.notes`，`versionCode=7`、`versionName=1.4.0`，最低 Android 6.0（API 23），目标 API 35。SHA-256：`c7dce77c9bcf1fcfdc8dd1fa680c503650773abff164cc425d707845e85aa34d`；签名证书 SHA-256：`9acac77ddfd6bc6e545744b9eeb612a3c0b1a3700d0eea7f3baf80f968ff2345`。`zipalign -c` 和 `apksigner verify` 均通过（v1、v2、v3）。签名密钥保存在本机 `~/.local/share/surge/signing/`，未纳入项目或 APK；后续覆盖安装需使用同一密钥。
 - 上述真机包没有调试构建的自签 CA 信任配置；尚未在用户的实体设备上测试。若设备已装相同包名的调试签名版本，Android 不允许直接覆盖安装。
 - Docker Compose 服务 `surge-surge-1` 在 `8787` 端口运行，`GET /api/health` 返回 `{"ok":true}`；重启容器后随机盐值保持一致。测试结束时，正式 Docker 卷的操作日志游标仍为 0。
 - 安装 OpenJDK 21、Android SDK 平台 35、Build Tools 35、Platform Tools 和 Emulator，并执行 `npm run android:sync` 与 `./gradlew assembleDebug --no-daemon`，构建成功。
@@ -90,3 +90,10 @@
 - 思维导图改为一份大纲与导图双视图：唯一中心主题、主题层级、导图节点点选与文字编辑、同级/子级添加及删除；保存后重新打开仍保留结构。
 - Android 15 模拟器真实点按大纲输入框后，键盘弹出时导图窗口高度约 578 CSS px，底部快捷栏位于其底边；真实回车从中心主题创建一级子主题。切换到导图视图后，节点与底部编辑操作正常显示。
 - `npm test` 6 项、Obsidian 类型检查与构建、Android debug/release 构建、APK 对齐及签名校验通过。
+
+## 2026-11-16 版本 1.4.0
+
+- 待办和引用：非空项回车续建，空项回车退出，空项退格删除；Shift+回车保留段内换行。Android 15 模拟器真实回车键与退格键分别验证了退出和删除待办项。
+- 格式栏增加下划线、删除线、有序/无序列表、引用、分割线和左/中/右对齐；引用改用双引号图标并可再次点击退出。移除独立表情入口；正文保留连续空格。浏览器检查了格式操作以及 Markdown 保存后重新渲染的往返结果。
+- 思维导图编辑窗设为可平移、不可双指缩放；Android WebView 计算样式为 `touch-action: pan-x pan-y`。
+- `npm test` 6 项、Android debug/release 构建、APK 对齐及签名校验通过；模拟器覆盖安装后显示 `versionCode=7`、`versionName=1.4.0`。

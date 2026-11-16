@@ -1,6 +1,6 @@
 const markerPattern = /^!?\[([^\]]*)\]\(surge-blob:([a-f0-9-]{36})\)$/;
-const inlinePattern = /(!?\[[^\]]*\]\(surge-blob:[a-f0-9-]{36}\)|\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/g;
-const blockStart = line => /^\s*(?:#{1,6}\s|[-*]\s|\d+\.\s|>\s|```|~~~)/.test(line) || /^\|/.test(line) || markerPattern.test(line.trim());
+const inlinePattern = /(!?\[[^\]]*\]\(surge-blob:[a-f0-9-]{36}\)|\*\*[^*\n]+\*\*|\*[^*\n]+\*|~~[^~\n]+~~|<u>[^<>\n]+<\/u>|`[^`\n]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/g;
+const blockStart = line => /^\s*(?:#{1,6}\s|[-*]\s|\d+\.\s|>\s|```|~~~|---\s*$)/.test(line) || /^\|/.test(line) || /^<(?:p|h[1-6]) align="(?:center|right)">/.test(line) || markerPattern.test(line.trim());
 
 function appendTextWithBreaks(parent, text) {
   text.split('\n').forEach((part, index) => {
@@ -38,6 +38,14 @@ function appendInline(parent, source) {
       const emphasis = document.createElement('em');
       emphasis.textContent = token.slice(1, -1);
       parent.append(emphasis);
+    } else if (token.startsWith('~~')) {
+      const strike = document.createElement('s');
+      strike.textContent = token.slice(2, -2);
+      parent.append(strike);
+    } else if (token.startsWith('<u>')) {
+      const underline = document.createElement('u');
+      underline.textContent = token.slice(3, -4);
+      parent.append(underline);
     } else if (token.startsWith('`')) {
       const code = document.createElement('code');
       code.textContent = token.slice(1, -1);
@@ -98,6 +106,16 @@ export function renderMarkdown(source, root) {
     const line = lines[i];
     if (!line.trim()) { i++; continue; }
     if (markerPattern.test(line.trim())) { root.append(attachmentNode(line)); i++; continue; }
+    if (/^\s*(?:---|\*\*\*|___)\s*$/.test(line)) { root.append(document.createElement('hr')); i++; continue; }
+    const aligned = /^<(p|h[1-6]) align="(center|right)">(.*)<\/\1>$/.exec(line);
+    if (aligned) {
+      const node = document.createElement(aligned[1]);
+      node.dataset.align = aligned[2];
+      appendInline(node, aligned[3]);
+      root.append(node);
+      i++;
+      continue;
+    }
     const fence = /^(\s*)(```|~~~)(.*)$/.exec(line);
     if (fence) {
       const sourceLines = [];
@@ -135,7 +153,7 @@ export function renderMarkdown(source, root) {
       while (i < lines.length && (ordered ? /^\s*\d+\.\s/.test(lines[i]) : /^\s*[-*]\s/.test(lines[i]))) {
         const value = lines[i++].replace(ordered ? /^\s*\d+\.\s/ : /^\s*[-*]\s/, '');
         const li = document.createElement('li');
-        const task = /^\[([ xX])\]\s*(.*)$/.exec(value);
+        const task = /^\[([ xX])\] (.*)$/.exec(value);
         if (task) {
           const checkbox = document.createElement('input');
           checkbox.type = 'checkbox';
@@ -144,6 +162,10 @@ export function renderMarkdown(source, root) {
           li.append(checkbox, document.createTextNode(' '));
           appendInline(li, task[2]);
         } else appendInline(li, value);
+        while (i < lines.length && /^ {2,}\S/.test(lines[i]) && !/^\s*(?:[-*]|\d+\.)\s/.test(lines[i])) {
+          li.append(document.createElement('br'));
+          appendInline(li, lines[i++].trimStart());
+        }
         list.append(li);
       }
       root.append(list);
@@ -152,8 +174,15 @@ export function renderMarkdown(source, root) {
     if (/^>\s?/.test(line)) {
       const quote = document.createElement('blockquote');
       while (i < lines.length && /^>\s?/.test(lines[i])) {
-        if (quote.childNodes.length) quote.append(document.createElement('br'));
-        appendInline(quote, lines[i++].replace(/^>\s?/, ''));
+        const value = lines[i++].replace(/^>\s?/, '');
+        if (value.startsWith('  ') && quote.lastElementChild) {
+          quote.lastElementChild.append(document.createElement('br'));
+          appendInline(quote.lastElementChild, value.slice(2));
+          continue;
+        }
+        const paragraph = document.createElement('p');
+        appendInline(paragraph, value);
+        quote.append(paragraph);
       }
       root.append(quote);
       continue;
@@ -178,6 +207,8 @@ function inlineMarkdown(node) {
   const value = [...node.childNodes].map(inlineMarkdown).join('');
   if (tag === 'b' || tag === 'strong') return '**' + value + '**';
   if (tag === 'i' || tag === 'em') return '*' + value + '*';
+  if (tag === 'u') return '<u>' + value + '</u>';
+  if (tag === 's' || tag === 'strike' || tag === 'del') return '~~' + value + '~~';
   if (tag === 'code') return '`' + value + '`';
   if (tag === 'a' && /^https?:\/\//.test(node.href)) return `[${value}](${node.href})`;
   return value;
@@ -188,11 +219,14 @@ function serializeBlock(node) {
   if (node.nodeType !== Node.ELEMENT_NODE) return '';
   const tag = node.tagName.toLowerCase();
   if (node.dataset?.marker) return node.dataset.marker;
+  if (tag === 'hr') return '---';
   if (tag === 'pre') return `${node.dataset.fence || '```'}${node.dataset.info || ''}\n${node.textContent || ''}\n${node.dataset.fence || '```'}`;
   if (tag === 'ul' || tag === 'ol') return [...node.children].map((li, index) => {
     const checkbox = li.querySelector(':scope > input[type="checkbox"]');
-    const text = [...li.childNodes].filter(child => child !== checkbox).map(inlineMarkdown).join('').trimStart();
-    return (tag === 'ol' ? `${(node.start || 1) + index}. ` : '- ') + (checkbox ? `[${checkbox.checked ? 'x' : ' '}] ` : '') + text;
+    const raw = [...li.childNodes].filter(child => child !== checkbox).map(inlineMarkdown).join('');
+    const text = checkbox ? raw.replace(/^[\u00a0 ]/, '') : raw;
+    const prefix = (tag === 'ol' ? `${(node.start || 1) + index}. ` : '- ') + (checkbox ? `[${checkbox.checked ? 'x' : ' '}] ` : '');
+    return prefix + text.split('\n').join('\n    ');
   }).join('\n');
   if (tag === 'table') {
     const rows = [...node.rows].map(row => [...row.cells].map(cell => inlineMarkdown(cell).replace(/\|/g, '\\|')));
@@ -200,8 +234,9 @@ function serializeBlock(node) {
     const rowText = row => '| ' + row.join(' | ') + ' |';
     return [rowText(rows[0]), rowText(rows[0].map(() => '---')), ...rows.slice(1).map(rowText)].join('\n');
   }
+  if (node.dataset?.align && /^(?:p|h[1-6])$/.test(tag)) return `<${tag} align="${node.dataset.align}">${inlineMarkdown(node)}</${tag}>`;
   if (/^h[1-6]$/.test(tag)) return '#'.repeat(Number(tag[1])) + ' ' + inlineMarkdown(node);
-  if (tag === 'blockquote') return inlineMarkdown(node).split('\n').map(line => '> ' + line).join('\n');
+  if (tag === 'blockquote') return [...node.children].filter(child => child.tagName === 'P').flatMap(child => inlineMarkdown(child).split('\n').map((line, index) => '> ' + (index ? '  ' : '') + line)).join('\n') || inlineMarkdown(node).split('\n').map(line => '> ' + line).join('\n');
   return inlineMarkdown(node);
 }
 

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compareVersions, latestRelease, parseRepository } from '../web/updates.mjs';
 
-test('GitHub repository input and release comparison', () => {
+test('GitHub repository parsing and release comparison', () => {
   assert.equal(parseRepository('https://github.com/yzxcxy/Surge'), 'yzxcxy/Surge');
   assert.equal(parseRepository('yzxcxy/Surge.git'), 'yzxcxy/Surge');
   assert.throws(() => parseRepository('https://example.com/Surge'));

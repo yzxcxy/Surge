@@ -162,8 +162,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-group h3 { margin: 0 0 18px; font-size: 16px; }
 .settings-link { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 3px 0; border: 0; background: none; color: #333; text-align: left; font-size: 15px; }
 .settings-link span:last-child { color: #999; font-size: 23px; line-height: 1; }
-.update-repo-label { display: block; margin: 19px 0 14px; color: #777; font-size: 13px; }
-.update-repo-label input { display: block; width: 100%; margin-top: 8px; padding: 10px 12px; border: 1px solid #e5e5e5; border-radius: 10px; background: #fff; color: #222; font-size: 14px; }
 .update-status { min-height: 18px; margin: 11px 0 0; color: #777; font-size: 13px; }
 #open-update { width: 100%; margin-top: 12px; }
 .settings-group summary { display: flex; align-items: center; justify-content: space-between; list-style: none; cursor: pointer; }
@@ -182,6 +180,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .entry-dialog::backdrop { background: #0005; backdrop-filter: blur(5px); }
 .entry-dialog h2 { margin: 0 0 18px; font-size: 19px; }
 .entry-dialog input, .entry-dialog textarea { width: 100%; padding: 11px 12px; border: 1px solid #ddd; border-radius: 9px; background: #fff; color: #222; font-size: 14px; }
+.image-source-options { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.image-source-options button { display: grid; place-items: center; gap: 8px; min-height: 96px; border: 0; border-radius: 14px; background: #f5f5f5; color: #303030; font-size: 14px; }
+.image-source-options svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.image-source-dialog .dialog-actions button:last-child { background: #f1f1f1; color: #333; }
 #move-folder { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 10px; background: #fff; }
 .emoji-dialog { width: min(440px, calc(100vw - 24px)); }
 .emoji-dialog #emoji-search { margin-bottom: 12px; font-size: 15px; }

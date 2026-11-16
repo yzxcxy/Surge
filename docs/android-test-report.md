@@ -4,11 +4,11 @@
 
 ## 构建与交付物
 
-- 真机测试包：[surge-android-device-test.apk](https://github.com/yzxcxy/Surge/releases/download/v1.2.0/surge-android-device-test.apk)，由 `assembleRelease` 的未签名 APK 对齐后，以独立的本机测试密钥签名。包名 `org.surge.notes`，`versionCode=4`、`versionName=1.2.0`，最低 Android 6.0（API 23），目标 API 35。SHA-256：`7e4fe22c4b5ef2ce4998d0ab59a6ddd418527c9f9ec4e8d0617044f50e8c4512`；签名证书 SHA-256：`9acac77ddfd6bc6e545744b9eeb612a3c0b1a3700d0eea7f3baf80f968ff2345`。`zipalign -c` 和 `apksigner verify` 均通过（v1、v2、v3）。签名密钥保存在本机 `~/.local/share/surge/signing/`，未纳入项目或 APK；后续覆盖安装需使用同一密钥。
+- 真机测试包：[surge-android-device-test.apk](https://github.com/yzxcxy/Surge/releases/download/v1.2.1/surge-android-device-test.apk)，由 `assembleRelease` 的未签名 APK 对齐后，以独立的本机测试密钥签名。包名 `org.surge.notes`，`versionCode=5`、`versionName=1.2.1`，最低 Android 6.0（API 23），目标 API 35。SHA-256：`9944a6da5b011695da49c07ddc8cad229af2fd1922f5e314f6305353b7def518`；签名证书 SHA-256：`9acac77ddfd6bc6e545744b9eeb612a3c0b1a3700d0eea7f3baf80f968ff2345`。`zipalign -c` 和 `apksigner verify` 均通过（v1、v2、v3）。签名密钥保存在本机 `~/.local/share/surge/signing/`，未纳入项目或 APK；后续覆盖安装需使用同一密钥。
 - 上述真机包没有调试构建的自签 CA 信任配置；尚未在用户的实体设备上测试。若设备已装相同包名的调试签名版本，Android 不允许直接覆盖安装。
 - Docker Compose 服务 `surge-surge-1` 在 `8787` 端口运行，`GET /api/health` 返回 `{"ok":true}`；重启容器后随机盐值保持一致。测试结束时，正式 Docker 卷的操作日志游标仍为 0。
 - 安装 OpenJDK 21、Android SDK 平台 35、Build Tools 35、Platform Tools 和 Emulator，并执行 `npm run android:sync` 与 `./gradlew assembleDebug --no-daemon`，构建成功。
-- 调试包位于本机 `dist/surge-android-debug.apk`，包名 `org.surge.notes`，大小约 3.9 MiB；本次 SHA-256：`39b5a92f06817cda8e09dddd5d6631b70a0d4438ef720d45c382e1d5bef17969`。
+- 调试包位于本机 `dist/surge-android-debug.apk`，包名 `org.surge.notes`，大小约 3.9 MiB；本次 SHA-256：`46bbe3878f4790fdd6380228109d4aeee1d4f57b6d369e26dff59ec3e66681a6`。
 - `npm test` 通过，覆盖加密操作、离线修改收敛、操作去重、鉴权、加密附件及服务端重启持久化。
 - Obsidian 插件的 `npx tsc --noEmit` 和 `npm run build` 通过。
 
@@ -76,3 +76,10 @@
 - 按开发阶段的产品取舍，移除公式入口、公式解析和 KaTeX 依赖及资源；APK 内未发现对应资源。旧的公式标记按普通文本显示。
 - 浏览器回归了图片后光标落点、媒体图标操作、背景色与卡片一致、导图全屏大纲输入、表格列宽、常用 Emoji 搜索和插入、T 格式工具栏、移动分类及长按批量操作。
 - 在 Android 15 模拟器安装调试包并启动，首页和笔记编辑页正常显示；`dumpsys` 显示 `versionCode=4`、`versionName=1.2.0`。`npm test` 6 项、Obsidian 类型检查与构建、Docker 健康检查及测试包签名校验通过。
+
+## 2026-11-16 版本 1.2.1
+
+- 设置中的更新检查固定使用 Surge 仓库，不再显示可编辑的仓库地址。图片工具栏合并相册与拍照入口。
+- 浏览器回归：插入待办后光标位于勾选框右侧；回车创建下一条待办。Android 15 模拟器用真实回车键确认续建待办。
+- Android 15 模拟器真实点按正文中的绘图后，图片操作栏保持可见；点击绘画图标可重新打开全屏画布。修复触屏产生的第二次 `click` 让操作栏立即关闭的问题。
+- `npm test` 6 项、Obsidian 类型检查与构建、Android debug/release 构建和 APK 签名校验通过；模拟器覆盖安装后的 `dumpsys` 显示 `versionCode=5`、`versionName=1.2.1`。

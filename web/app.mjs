@@ -1,7 +1,7 @@
 import { bytesToUrl, decryptValue, deriveKey, downloadBlob, encryptValue, exchange, fetchInfo, historyForNote, makeOp, materialize, reencryptOps, uploadBlob, urlToBytes } from './core.mjs';
 import { allBlobs, allOps, getBlob, getMeta, openDb, putBlobs, putMeta, putOps, replaceVault } from './db.mjs';
 import { attachmentNode, tableNode, renderInlineMarkdown, renderMarkdown, serializeMarkdown } from './rich-editor.mjs';
-import { APP_VERSION, DEFAULT_REPOSITORY, compareVersions, latestRelease, parseRepository } from './updates.mjs';
+import { APP_VERSION, DEFAULT_REPOSITORY, compareVersions, latestRelease } from './updates.mjs';
 
 const $ = id => document.getElementById(id);
 if (window.Capacitor?.isNativePlatform?.()) document.documentElement.classList.add('native-app');
@@ -65,7 +65,6 @@ function showSettings() {
   $('disable-sync').hidden = !server;
   $('sync-details').open = false;
   $('current-version').textContent = APP_VERSION;
-  $('update-repo').value = localStorage.getItem('surge-update-repo') || DEFAULT_REPOSITORY;
   $('settings-panel').hidden = false;
   history.pushState({ surgeSettings: true }, '', location.href);
 }
@@ -625,7 +624,7 @@ function insertBlock(node) {
   if (after) node.after(after);
   const target = after || node.querySelector('td, li') || node;
   caret.selectNodeContents(target);
-  caret.collapse(target !== node);
+  caret.collapse(target.tagName !== 'LI');
   focusRange(caret);
   saveEditorBody();
 }
@@ -635,9 +634,37 @@ function insertTask() {
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.contentEditable = 'false';
-  item.append(checkbox, document.createTextNode(' '));
+  item.append(checkbox, document.createTextNode('\u00a0'));
   list.append(item);
   insertBlock(list);
+}
+function continueTask(event) {
+  if (composingBody || event.isComposing || event.target.closest('input')) return;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || !selection.isCollapsed) return;
+  const range = selection.getRangeAt(0);
+  const node = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+  const item = node?.closest('li');
+  const existingCheckbox = item?.querySelector(':scope > input[type="checkbox"]');
+  if (!item || !$('note-body').contains(item) || !item.parentElement?.matches('ul, ol') || !existingCheckbox) return;
+  event.preventDefault();
+  const tail = document.createRange();
+  tail.selectNodeContents(item);
+  if (range.startContainer === item && range.startOffset === 0) tail.setStartAfter(existingCheckbox);
+  else tail.setStart(range.startContainer, range.startOffset);
+  const remainder = tail.extractContents();
+  const next = document.createElement('li');
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.contentEditable = 'false';
+  const spacer = document.createTextNode('\u00a0');
+  next.append(checkbox, spacer, remainder);
+  item.after(next);
+  const caret = document.createRange();
+  caret.setStart(spacer, spacer.length);
+  caret.collapse(true);
+  focusRange(caret);
+  saveEditorBody();
 }
 function applyFormat(kind) {
   if (!current) return;
@@ -706,7 +733,12 @@ async function renderAttachments(id) {
         image.alt = payload.caption || (payload.kind === 'mindmap' ? '思维导图' : payload.kind === 'drawing' ? '绘图' : '图片');
         card.append(image);
         if (payload.caption) { const caption = document.createElement('figcaption'); caption.textContent = payload.caption; card.append(caption); }
-        card.onclick = event => { event.stopPropagation(); showAttachmentActions(card, payload); };
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        card.setAttribute('aria-label', payload.kind === 'drawing' ? '绘图操作' : payload.kind === 'mindmap' ? '导图操作' : '图片操作');
+        let pointerHandledAt = -Infinity;
+        card.onpointerdown = event => { event.preventDefault(); event.stopPropagation(); pointerHandledAt = performance.now(); showAttachmentActions(card, payload); };
+        card.onclick = event => { event.stopPropagation(); if (performance.now() - pointerHandledAt > 500) showAttachmentActions(card, payload); };
       } else if (payload.kind === 'audio') {
         const label = document.createElement('span'); label.textContent = payload.name || '录音'; card.append(label);
         const player = document.createElement('audio');
@@ -882,14 +914,6 @@ $('glass-toggle').onchange = event => setGlass(event.target.checked);
 $('settings-back').onclick = closeSettings;
 $('open-trash').onclick = () => { closeSettings(); setView('trash'); };
 let updateUrl = null;
-$('update-repo').onchange = event => {
-  try {
-    const repo = parseRepository(event.target.value);
-    localStorage.setItem('surge-update-repo', repo);
-    event.target.value = repo;
-    $('update-status').textContent = '';
-  } catch (error) { $('update-status').textContent = error.message; }
-};
 $('check-update').onclick = async () => {
   const statusNode = $('update-status');
   const button = $('check-update');
@@ -898,9 +922,7 @@ $('check-update').onclick = async () => {
   button.disabled = true;
   statusNode.textContent = '正在检查…';
   try {
-    const repo = parseRepository($('update-repo').value);
-    localStorage.setItem('surge-update-repo', repo);
-    const release = await latestRelease(repo);
+    const release = await latestRelease(DEFAULT_REPOSITORY);
     const comparison = compareVersions(release.version, APP_VERSION);
     if (comparison === null) statusNode.textContent = `最新版本：${release.version}`;
     else statusNode.textContent = comparison > 0 ? `发现新版本 ${release.version}` : `已是最新版本（${APP_VERSION}）`;
@@ -1113,6 +1135,8 @@ $('note-title').addEventListener('compositionstart', () => { composingTitle = tr
 $('note-title').addEventListener('compositionend', event => { composingTitle = false; if (current) changeNote(current, 'title', event.target.value); });
 $('note-body').addEventListener('compositionstart', () => { composingBody = true; });
 $('note-body').addEventListener('compositionend', () => { composingBody = false; applyMarkdownShortcut(); saveEditorBody(); });
+$('note-body').addEventListener('keydown', event => { if (event.key === 'Enter') continueTask(event); });
+$('note-body').addEventListener('beforeinput', event => { if (['insertParagraph', 'insertLineBreak'].includes(event.inputType)) continueTask(event); });
 document.addEventListener('selectionchange', () => {
   const selection = window.getSelection();
   if (selection.rangeCount && $('note-body').contains(selection.anchorNode)) bodyRange = selection.getRangeAt(0).cloneRange();
@@ -1146,12 +1170,16 @@ document.querySelectorAll('[data-insert]').forEach(button => button.onclick = ()
   if (action === 'text') focusRange();
   else if (action === 'task') insertTask();
   else if (action === 'table') insertBlock(tableNode());
-  else if (['image', 'camera', 'file'].includes(action)) $('pick-' + action).click();
+  else if (action === 'image') $('image-source-dialog').showModal();
+  else if (action === 'file') $('pick-file').click();
   else if (action === 'audio') $('record-dialog').showModal();
   else if (action === 'drawing') openDrawingEditor();
   else if (action === 'mindmap') openMindmapEditor();
   else if (action === 'emoji') { $('emoji-search').value = ''; renderEmojis(); $('emoji-dialog').showModal(); $('emoji-search').focus(); }
 });
+$('image-from-album').onclick = () => { $('image-source-dialog').close(); $('pick-image').click(); };
+$('image-from-camera').onclick = () => { $('image-source-dialog').close(); $('pick-camera').click(); };
+$('image-source-cancel').onclick = () => $('image-source-dialog').close();
 const emojis = [
   ['😀','开心 笑脸'],['😄','大笑 开心'],['😊','微笑 温暖'],['🥹','感动'],['😂','笑哭'],['🤣','爆笑'],['😅','尴尬'],['🥰','喜欢 爱'],['😍','心动'],['😘','亲亲'],['😎','酷'],['🤔','思考'],['😮','惊讶'],['🥲','苦笑'],['😢','难过'],['😭','大哭'],['😤','生气'],['😴','睡觉'],['🤒','生病'],['🥳','庆祝'],['🤗','拥抱'],['🫠','融化'],['🙃','无奈'],['😇','天使'],
   ['👍','赞 好'],['👎','不赞'],['👏','鼓掌'],['🙌','万岁'],['👌','可以'],['✌️','胜利'],['🤞','好运'],['🙏','谢谢 拜托'],['💪','加油 力量'],['👀','看'],['🫶','爱心'],['👋','你好 再见'],

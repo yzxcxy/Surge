@@ -1,10 +1,10 @@
 {
-  "tag_name": "v1.3.0",
-  "html_url": "https://github.com/yzxcxy/Surge/releases/tag/v1.3.0",
+  "tag_name": "v1.4.0",
+  "html_url": "https://github.com/yzxcxy/Surge/releases/tag/v1.4.0",
   "assets": [
     {
       "name": "surge-android-device-test.apk",
-      "browser_download_url": "https://github.com/yzxcxy/Surge/releases/download/v1.3.0/surge-android-device-test.apk"
+      "browser_download_url": "https://github.com/yzxcxy/Surge/releases/download/v1.4.0/surge-android-device-test.apk"
     }
   ]
 }

@@ -74,6 +74,7 @@ export function renderInlineMarkdown(source, root) {
 export function tableNode(rows = [['项目', '内容'], ['', '']]) {
   const table = document.createElement('table');
   table.className = 'rich-table';
+  const columnCount = Math.max(1, rows[0]?.length || 0);
   const thead = document.createElement('thead');
   const header = document.createElement('tr');
   for (const value of rows[0] || []) {
@@ -86,9 +87,9 @@ export function tableNode(rows = [['项目', '内容'], ['', '']]) {
   const tbody = document.createElement('tbody');
   for (const row of rows.slice(1)) {
     const tr = document.createElement('tr');
-    for (const value of row) {
+    for (let column = 0; column < columnCount; column++) {
       const cell = document.createElement('td');
-      appendInline(cell, value);
+      appendInline(cell, (row[column] || '').replace(/<br\s*\/?>/gi, '\n'));
       tr.append(cell);
     }
     tbody.append(tr);
@@ -97,7 +98,23 @@ export function tableNode(rows = [['项目', '内容'], ['', '']]) {
   return table;
 }
 
-const tableCells = line => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
+function tableCells(line) {
+  const source = line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '');
+  return source.split(/(?<!\\)\|/).map(cell => cell.trim().replace(/(?:<br>)+$/g, '').replace(/\\\|/g, '|'));
+}
+
+function readTableRow(lines, start, columns) {
+  let source = lines[start];
+  let next = start + 1;
+  // Older notes could contain literal newlines inside a cell. Rejoin that row
+  // before parsing its columns so the following empty cell is not lost.
+  while (tableCells(source).length < columns && !/(?<!\\)\|\s*$/.test(source) && next < lines.length) {
+    if (!lines.slice(next, next + 4).some(line => /(?<!\\)\|\s*$/.test(line))) break;
+    source += '<br>' + lines[next].trim();
+    next++;
+  }
+  return { cells: tableCells(source), next };
+}
 
 export function renderMarkdown(source, root) {
   root.replaceChildren();
@@ -134,7 +151,11 @@ export function renderMarkdown(source, root) {
     if (/^\|/.test(line) && i + 1 < lines.length && /^\|?\s*:?-{3,}/.test(lines[i + 1])) {
       const rows = [tableCells(line)];
       i += 2;
-      while (i < lines.length && /^\|/.test(lines[i])) rows.push(tableCells(lines[i++]));
+      while (i < lines.length && /^\|/.test(lines[i])) {
+        const row = readTableRow(lines, i, rows[0].length);
+        rows.push(row.cells);
+        i = row.next;
+      }
       root.append(tableNode(rows));
       continue;
     }
@@ -229,7 +250,7 @@ function serializeBlock(node) {
     return prefix + text.split('\n').join('\n    ');
   }).join('\n');
   if (tag === 'table') {
-    const rows = [...node.rows].map(row => [...row.cells].map(cell => inlineMarkdown(cell).replace(/\|/g, '\\|')));
+    const rows = [...node.rows].map(row => [...row.cells].map(cell => inlineMarkdown(cell).replace(/\|/g, '\\|').replace(/\n+/g, '<br>')));
     if (!rows.length) return '';
     const rowText = row => '| ' + row.join(' | ') + ' |';
     return [rowText(rows[0]), rowText(rows[0].map(() => '---')), ...rows.slice(1).map(rowText)].join('\n');

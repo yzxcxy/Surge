@@ -24,15 +24,15 @@ test('encrypted offline edits converge after server exchange and survive restart
     const key=await deriveKey('correct horse battery staple',info.salt);
     const actorA=crypto.randomUUID(), actorB=crypto.randomUUID(), noteId=crypto.randomUUID();
     const a=[await makeOp(key,actorA,1,noteId,'title','离线标题'),await makeOp(key,actorA,2,noteId,'body','A 的正文')];
-    const b=[await makeOp(key,actorB,1,noteId,'folder','工作'),await makeOp(key,actorB,2,noteId,'pinned',true),await makeOp(key,actorB,3,noteId,'background','sage'),await makeOp(key,actorB,4,noteId,'kind','mindmap'),await makeOp(key,actorB,5,noteId,'reminderAt',1763300000000),await makeOp(key,actorB,6,noteId,'purged',true)];
+    const b=[await makeOp(key,actorB,1,noteId,'folder','工作'),await makeOp(key,actorB,2,noteId,'pinned',true),await makeOp(key,actorB,3,noteId,'background','sage'),await makeOp(key,actorB,4,noteId,'kind','mindmap'),await makeOp(key,actorB,5,noteId,'reminderAt',1763300000000),await makeOp(key,actorB,6,noteId,'reminderRule','monthly'),await makeOp(key,actorB,7,noteId,'reminderLunar',true),await makeOp(key,actorB,8,noteId,'purged',true)];
     const headers={ Authorization:'Bearer '+token,'Content-Type':'application/json' };
     assert.equal((await fetch(base+'/api/ops',{ method:'POST',headers,body:JSON.stringify({ops:[{...a[0],plaintext:'must not persist'},a[1]]}) })).status,200);
     assert.equal((await fetch(base+'/api/ops',{ method:'POST',headers,body:JSON.stringify({ops:b}) })).status,200);
     await fetch(base+'/api/ops',{ method:'POST',headers,body:JSON.stringify({ops:a}) });
     const page=await (await fetch(base+'/api/ops?after=0',{headers})).json();
-    assert.equal(page.ops.length,8,'duplicate upload should be idempotent');
+    assert.equal(page.ops.length,10,'duplicate upload should be idempotent');
     assert.equal(JSON.stringify(page).includes('must not persist'),false,'extra fields must be stripped');
-    assert.equal(page.cursor,8);
+    assert.equal(page.cursor,10);
     const left=await materialize([...a,...page.ops],key);
     const right=await materialize([...b,...page.ops],key);
     assert.equal(left.notes.get(noteId).title,right.notes.get(noteId).title);
@@ -43,6 +43,8 @@ test('encrypted offline edits converge after server exchange and survive restart
     assert.equal(right.notes.get(noteId).background,'sage');
     assert.equal(right.notes.get(noteId).kind,'mindmap');
     assert.equal(right.notes.get(noteId).reminderAt,1763300000000);
+    assert.equal(right.notes.get(noteId).reminderRule,'monthly');
+    assert.equal(right.notes.get(noteId).reminderLunar,true);
     assert.equal(right.notes.get(noteId).purged,true);
     assert.equal((await fetch(base+'/api/ops')).status,401);
     assert.equal(JSON.stringify(page).includes('A 的正文'),false,'server should only receive ciphertext');

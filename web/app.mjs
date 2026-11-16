@@ -2,19 +2,25 @@ import { bytesToUrl, decryptValue, deriveKey, downloadBlob, encryptValue, exchan
 import { allBlobs, allOps, getBlob, getMeta, openDb, pruneNote, putBlobs, putMeta, putOps, replaceVault } from './db.mjs';
 import { attachmentNode, tableNode, renderInlineMarkdown, renderMarkdown, serializeMarkdown } from './rich-editor.mjs';
 import { APP_VERSION, DEFAULT_REPOSITORY, compareVersions, latestRelease } from './updates.mjs';
+import { lunarDayLabel, reminderOccurrences, reminderNotificationId } from './todo-reminders.mjs';
 
 const $ = id => document.getElementById(id);
 if (window.Capacitor?.isNativePlatform?.()) document.documentElement.classList.add('native-app');
 
 let db, key, server = null, token = null, actor, clock = 0, cursor = 0;
 let notes = new Map(), current = null, draftId = null, view = 'all', tab = 'notes', query = '';
-let syncing = false, syncTimer, writeQueue = Promise.resolve();
+let syncing = false, syncTimer, writeQueue = Promise.resolve(), draftCommit = Promise.resolve();
 let folderCatalog = [], folderDialogMode = 'create', renameFrom = '', folderAssignId = null;
+let categorySelectMode = false, selectedCategories = new Set();
 let attachmentUrls = [];
 let bodyRange = null;
 let attachmentTarget = null, attachmentPayload = null;
 let selectMode = false, selectedNotes = new Set(), moveTargets = [];
-let editingTodoId = null, todoExpanded = new Set();
+let editingTodoId = null, todoExpanded = new Set(), completedTodosOpen = true;
+let draftUntouched = false;
+let todoReminderRule = 'none', todoReminderLunar = false, reminderSelectedDate = null, reminderMonth = null;
+let notificationSyncTimer = null, notificationSync = Promise.resolve();
+let exactAlarmSettingRequested = false;
 let nativeVisibleHeight = Infinity;
 let layout = localStorage.getItem('surge-layout') === 'grid' ? 'grid' : 'list';
 const vaultMarker = 'surge-vault-v1';
@@ -27,6 +33,7 @@ const syncConfigured = () => {
 const cleanOp = op => ({ id: op.id, noteId: op.noteId, field: op.field, clock: op.clock, actor: op.actor, ciphertext: op.ciphertext });
 const editableBody = value => value.replace(/\n?!?\[[^\]]*\]\(surge-blob:[a-f0-9-]{36}\)/g, '');
 const previewBody = value => editableBody(value)
+  .replace(/<br\s*\/?>/gi, ' ')
   .replace(/^#{1,6}\s+/gm, '')
   .replace(/^\s*[-*]\s+\[([ xX])\]\s*/gm, (_, checked) => checked.toLowerCase() === 'x' ? '☑ ' : '☐ ')
   .replace(/^\s*[-*]\s+/gm, '• ')
@@ -58,7 +65,7 @@ function showLegacy(error = '') {
 }
 function showSettings() {
   if (!$('settings-panel').hidden) return;
-  closeMobileNav();
+  closeCategoryPanel();
   $('server').value = localStorage.getItem('surge-server') || '';
   $('token').value = localStorage.getItem('surge-token') || '';
   $('sync-passphrase').value = '';
@@ -82,13 +89,13 @@ function editDate(ms, length) {
   return `${ms ? new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(ms) : '刚刚'}　|　${length} 字`;
 }
 function viewName() {
-  return view === 'all' ? '笔记' : view === 'pinned' ? '置顶' : view === 'trash' ? '回收站' : view;
+  return view === 'all' ? '笔记' : view === 'pinned' ? '置顶' : view === 'trash' ? '回收站' : view === '__uncategorized__' ? '未分类' : view;
 }
 function activeNotes() {
   return [...notes.values()]
     .filter(n => n.id !== draftId)
     .filter(n => !isFolderRecord(n) && !n.purged)
-    .filter(n => view === 'trash' ? n.deleted : !n.deleted && (view === 'all' || (view === 'pinned' ? n.pinned : n.folder === view)))
+    .filter(n => view === 'trash' ? n.deleted : !n.deleted && (view === 'all' || (view === 'pinned' ? n.pinned : view === '__uncategorized__' ? !n.folder : n.folder === view)))
     .filter(n => view === 'trash' || (tab === 'todos' ? noteKind(n) === 'todo' : noteKind(n) !== 'todo'))
     .filter(n => (n.title + '\n' + n.body).toLowerCase().includes(query))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt);
@@ -99,12 +106,27 @@ function todoItems(note) {
   return (note.body || '').split('\n').map(line => /^- \[([ xX])\] (.*)$/.exec(line)).filter(Boolean).map(match => ({ done: match[1].toLowerCase() === 'x', text: match[2] }));
 }
 const todoBody = items => items.filter(item => item.text.trim()).map(item => `- [${item.done ? 'x' : ' '}] ${item.text.trim()}`).join('\n');
+const todoIsChecklist = (note, items = todoItems(note)) => items.length > 1 || (items.length === 1 && !!note.title && note.title.trim() !== items[0].text.trim());
+const reminderRuleLabels = { none: '', daily: '每天', weekly: '每周', monthly: '每月', yearly: '每年' };
+function todoReminderText(when, rule = 'none', lunar = false, completed = false) {
+  if (!when) return '';
+  const next = !completed && rule !== 'none' ? reminderOccurrences(when, rule, lunar)[0] : 0;
+  const date = new Date(next || when);
+  const today = new Date();
+  const sameDay = date.toDateString() === today.toDateString();
+  const day = sameDay ? '今天' : new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date);
+  const time = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+  const repeat = reminderRuleLabels[rule] ? ` · ${reminderRuleLabels[rule]}` : '';
+  return `${day} ${time}${date.getTime() < Date.now() && !next ? ' 已过期' : ''}${repeat}${lunar ? ' · 农历' : ''} ◉`;
+}
+const categoryRecords = name => [...notes.values()].filter(note => isFolderRecord(note) && !note.deleted && !note.purged && note.title === name);
+const categoryPinned = name => categoryRecords(name).some(note => note.pinned);
 function allFolders() {
   return [...new Set([
     ...folderCatalog,
     ...[...notes.values()].filter(note => !note.deleted && !note.purged && isFolderRecord(note) && note.title).map(note => note.title),
     ...[...notes.values()].filter(note => !note.deleted && !note.purged && !isFolderRecord(note) && note.folder).map(note => note.folder)
-  ])].sort();
+  ])].sort((a, b) => Number(categoryPinned(b)) - Number(categoryPinned(a)) || a.localeCompare(b, 'zh-CN'));
 }
 function updateFolderSelect(folders) {
   const select = $('note-folder');
@@ -116,40 +138,88 @@ function updateFolderSelect(folders) {
     return option;
   }));
   select.value = value;
-  const mobile = $('mobile-folder');
-  mobile.replaceChildren(...['', ...folders, '__new__'].map(folder => {
-    const option = document.createElement('option');
-    option.value = folder;
-    option.textContent = folder === '__new__' ? '新建文件夹…' : folder || '文件夹';
-    return option;
+}
+function renderCategoryPanel(folders) {
+  const active = [...notes.values()].filter(note => note.id !== draftId && !note.deleted && !note.purged && !isFolderRecord(note));
+  const entries = [
+    { value: 'all', label: '全部', count: active.length },
+    ...folders.map(folder => ({ value: folder, label: folder, count: active.filter(note => note.folder === folder).length })),
+    { value: '__uncategorized__', label: '未分类', count: active.filter(note => !note.folder).length }
+  ];
+  $('category-list').replaceChildren(...entries.map(entry => {
+    const button = document.createElement('button');
+    const custom = !['all', '__uncategorized__'].includes(entry.value);
+    button.className = 'category-list-item';
+    button.classList.toggle('selecting', categorySelectMode && custom);
+    button.classList.toggle('current', view === entry.value && !categorySelectMode);
+    button.classList.toggle('selected', categorySelectMode && selectedCategories.has(entry.value));
+    button.disabled = categorySelectMode && !custom;
+    const mark = document.createElement('span');
+    mark.className = 'category-list-mark';
+    mark.textContent = categorySelectMode ? (selectedCategories.has(entry.value) || (!custom && view === entry.value) ? '✓' : '') : (view === entry.value ? '✓' : '');
+    const label = document.createElement('span');
+    label.className = 'category-list-label';
+    label.textContent = entry.label;
+    const count = document.createElement('span');
+    count.className = 'category-list-count';
+    count.textContent = String(entry.count);
+    button.append(mark, label, count);
+    button.onclick = () => {
+      if (categorySelectMode) {
+        selectedCategories.has(entry.value) ? selectedCategories.delete(entry.value) : selectedCategories.add(entry.value);
+        renderCategoryPanel(folders);
+      } else setView(entry.value);
+    };
+    return button;
   }));
-  mobile.value = folders.includes(view) ? view : '';
-  mobile.classList.toggle('active', folders.includes(view));
+  $('category-title').textContent = categorySelectMode ? `已选择${selectedCategories.size}项` : '分类';
+  $('category-back').textContent = categorySelectMode ? '×' : '←';
+  $('category-back').setAttribute('aria-label', categorySelectMode ? '取消选择' : '返回笔记');
+  $('category-select-toggle').disabled = !folders.length;
+  $('category-select-toggle').setAttribute('aria-label', categorySelectMode ? (selectedCategories.size === folders.length ? '取消全选' : '全选') : '选择分类');
+  $('category-select-toggle').innerHTML = categorySelectMode ? listIcon : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13"/></svg>';
+  $('category-create').hidden = categorySelectMode;
+  $('category-batch-bar').hidden = !categorySelectMode;
+  $('category-pin').disabled = !selectedCategories.size;
+  $('category-delete').disabled = !selectedCategories.size;
+  $('category-edit').disabled = selectedCategories.size !== 1;
+  $('category-pin-label').textContent = selectedCategories.size && [...selectedCategories].every(categoryPinned) ? '取消置顶' : '置顶';
 }
 function render() {
   const folders = allFolders();
-  $('folders').replaceChildren(...folders.map(folder => {
+  const categoryRow = (folder, mobile = false) => {
+    const row = document.createElement('div');
+    row.className = mobile ? 'mobile-category-row' : 'folder-item-row';
     const button = document.createElement('button');
-    button.className = 'folder-item' + (view === folder ? ' active' : '');
-    button.textContent = '▱  ' + folder;
+    button.className = (mobile ? 'mobile-category-item' : 'folder-item') + (view === folder ? ' active' : '');
+    button.textContent = mobile ? folder : '▱  ' + folder;
     button.onclick = () => setView(folder);
-    return button;
-  }));
-  document.querySelectorAll('.nav').forEach(button => button.classList.toggle('active', button.dataset.view === view));
-  document.querySelectorAll('[data-mobile-view]').forEach(button => button.classList.toggle('active', button.dataset.mobileView === view));
-  $('category-strip').replaceChildren(...[['all', '全部'], ...folders.map(folder => [folder, folder])].map(([value, label]) => {
+    const actions = document.createElement('button');
+    actions.className = 'category-actions';
+    actions.textContent = '⋯';
+    actions.setAttribute('aria-label', `操作“${folder}”分类`);
+    actions.onclick = () => openFolderManageDialog(folder);
+    row.append(button, actions);
+    return row;
+  };
+  $('folders').replaceChildren(...folders.map(folder => categoryRow(folder)));
+  $('category-strip').replaceChildren(...[
+    ['all', '全部'], ...folders.map(folder => [folder, folder]), ['__uncategorized__', '未分类']
+  ].map(([value, label]) => {
     const button = document.createElement('button');
     button.textContent = label;
     button.classList.toggle('active', view === value);
     button.onclick = () => setView(value);
     return button;
   }));
+  $('category-strip').hidden = view === 'trash' || tab === 'todos';
+  renderCategoryPanel(folders);
+  document.querySelectorAll('.nav').forEach(button => button.classList.toggle('active', button.dataset.view === view));
   document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
   const name = tab === 'todos' ? '待办' : viewName();
   $('view-title').textContent = name;
   $('breadcrumbs').textContent = name;
   $('trash-back').hidden = view !== 'trash';
-  $('category-strip').parentElement.hidden = view === 'trash' || tab === 'todos';
   $('mobile-folders').hidden = tab === 'todos';
   $('search').placeholder = tab === 'todos' ? '搜索待办' : '搜索笔记';
   $('new-note').hidden = view === 'trash';
@@ -158,6 +228,11 @@ function render() {
   $('tabbar').hidden = view === 'trash' || selectMode;
   $('batch-bar').hidden = !selectMode;
   $('batch-count').textContent = `已选 ${selectedNotes.size} 项`;
+  $('batch-pin').hidden = view === 'trash';
+  $('batch-move').hidden = view === 'trash';
+  $('batch-restore').hidden = view !== 'trash';
+  $('batch-delete').setAttribute('aria-label', view === 'trash' ? '彻底删除' : '删除');
+  $('batch-delete').title = view === 'trash' ? '彻底删除' : '删除';
   if (selectMode) $('fab').hidden = true;
   $('notes').hidden = tab !== 'notes';
   $('todos').hidden = tab !== 'todos';
@@ -198,7 +273,7 @@ function render() {
     button.append(title, preview, footer);
     let hold, held = false, startX = 0, startY = 0;
     button.onpointerdown = event => {
-      if (selectMode || view === 'trash') return;
+      if (selectMode) return;
       startX = event.clientX; startY = event.clientY;
       hold = setTimeout(() => { held = true; selectMode = true; selectedNotes.add(note.id); navigator.vibrate?.(25); render(); }, 480);
     };
@@ -208,6 +283,7 @@ function render() {
     button.onclick = () => {
       if (held) { held = false; return; }
       if (selectMode) { selectedNotes.has(note.id) ? selectedNotes.delete(note.id) : selectedNotes.add(note.id); if (!selectedNotes.size) exitSelection(); render(); }
+      else if (view === 'trash' && button.parentElement?.classList.contains('revealed')) button.parentElement.classList.remove('revealed');
       else openEditor(note.id);
     };
     if (view !== 'trash') return button;
@@ -217,44 +293,60 @@ function render() {
     actions.className = 'trash-card-actions';
     const restore = document.createElement('button');
     restore.textContent = '恢复';
-    restore.onclick = () => changeNote(note.id, 'deleted', false);
     const remove = document.createElement('button');
     remove.textContent = '彻底移除';
-    remove.onclick = () => purgeNote(note.id);
     actions.append(restore, remove);
     wrapper.append(button, actions);
+    let swipeStart = null;
+    button.addEventListener('pointerdown', event => { swipeStart = { x: event.clientX, y: event.clientY }; });
+    button.addEventListener('pointerup', event => {
+      if (!swipeStart || selectMode) return;
+      const dx = event.clientX - swipeStart.x, dy = event.clientY - swipeStart.y;
+      swipeStart = null;
+      if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
+      wrapper.classList.toggle('revealed', dx < 0);
+      if (dx < 0) { held = true; setTimeout(() => { held = false; }, 0); }
+    });
+    button.addEventListener('pointercancel', () => { swipeStart = null; });
+    restore.onclick = () => changeNote(note.id, 'deleted', false);
+    remove.onclick = () => { if (confirm(`彻底删除“${note.title || '未命名笔记'}”？此操作无法撤销。`)) purgeNote(note.id); };
     return wrapper;
   }));
-  $('todos').replaceChildren(...(tab === 'todos' ? list : []).map(note => {
+  const renderTodoCard = note => {
     const items = todoItems(note);
+    if (!items.length && note.title) items.push({ text: note.title, done: false });
     const done = items.filter(item => item.done).length;
+    const checklist = todoIsChecklist(note, items);
     const card = document.createElement('article');
-    card.className = 'todo-card';
+    card.className = 'todo-card' + (checklist ? ' checklist' : ' simple') + (items.length && done === items.length ? ' completed' : '');
     card.dataset.noteId = note.id;
     const head = document.createElement('div');
     head.className = 'todo-card-head';
     const all = document.createElement('input');
     all.type = 'checkbox';
     all.checked = !!items.length && done === items.length;
-    all.setAttribute('aria-label', '完成整组待办');
+    all.setAttribute('aria-label', checklist ? '完成整组待办' : '完成待办');
     all.onchange = () => changeNote(note.id, 'body', todoBody(items.map(item => ({ ...item, done: all.checked }))));
     const title = document.createElement('button');
     title.className = 'todo-card-title';
     title.innerHTML = `<strong></strong><small></small>`;
     title.querySelector('strong').textContent = note.title || '未命名待办';
-    title.querySelector('small').textContent = note.reminderAt ? new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(note.reminderAt) : niceDate(note.updatedAt);
+    title.querySelector('small').textContent = todoReminderText(note.reminderAt, note.reminderRule, note.reminderLunar, done === items.length);
+    title.querySelector('small').hidden = !note.reminderAt;
     title.onclick = () => openTodoEditor(note.id);
     const progress = document.createElement('span');
     progress.className = 'todo-progress';
     progress.textContent = `${done} / ${items.length}`;
+    progress.hidden = !checklist;
     const expand = document.createElement('button');
     expand.className = 'todo-expand';
     expand.setAttribute('aria-label', todoExpanded.has(note.id) ? '收起待办' : '展开待办');
     expand.textContent = todoExpanded.has(note.id) ? '⌃' : '⌄';
+    expand.hidden = !checklist;
     expand.onclick = () => { todoExpanded.has(note.id) ? todoExpanded.delete(note.id) : todoExpanded.add(note.id); render(); };
     head.append(all, title, progress, expand);
     card.append(head);
-    if (todoExpanded.has(note.id)) {
+    if (checklist && todoExpanded.has(note.id)) {
       const children = document.createElement('div');
       children.className = 'todo-card-items';
       items.forEach((item, index) => {
@@ -270,12 +362,36 @@ function render() {
       card.append(children);
     }
     return card;
-  }));
+  };
+  const todoList = tab === 'todos' ? list : [];
+  const openTodos = todoList.filter(note => { const items = todoItems(note); return !items.length || items.some(item => !item.done); });
+  const completedTodos = todoList.filter(note => { const items = todoItems(note); return items.length && items.every(item => item.done); }).sort((a, b) => b.updatedAt - a.updatedAt);
+  const completedSection = document.createElement('section');
+  completedSection.className = 'todo-completed-section';
+  if (completedTodos.length) {
+    const toggle = document.createElement('button');
+    toggle.className = 'todo-completed-toggle';
+    toggle.textContent = `${completedTodosOpen ? '⌃' : '⌄'}  已完成 ${completedTodos.length}`;
+    toggle.setAttribute('aria-expanded', String(completedTodosOpen));
+    toggle.onclick = () => { completedTodosOpen = !completedTodosOpen; render(); };
+    completedSection.append(toggle);
+    if (completedTodosOpen) completedSection.append(...completedTodos.map(renderTodoCard));
+  }
+  $('todos').replaceChildren(...openTodos.map(renderTodoCard), completedSection);
   updateFolderSelect(folders);
 }
-function closeMobileNav() {
-  $('mobile-nav').hidden = true;
+function closeCategoryPanel() {
+  $('category-panel').hidden = true;
+  categorySelectMode = false;
+  selectedCategories.clear();
   $('mobile-folders').setAttribute('aria-expanded', 'false');
+}
+function openCategoryPanel() {
+  categorySelectMode = false;
+  selectedCategories.clear();
+  $('category-panel').hidden = false;
+  $('mobile-folders').setAttribute('aria-expanded', 'true');
+  renderCategoryPanel(allFolders());
 }
 async function persistFolders() {
   await putMeta(db, 'folders', await encryptValue(key, folderCatalog));
@@ -285,6 +401,15 @@ async function createFolderRecord(name) {
   await save(id, 'body', folderRecordBody);
   await save(id, 'title', name);
   await save(id, 'updatedAt', Date.now());
+  return id;
+}
+async function setCategoryPinned(name, pinned) {
+  let records = categoryRecords(name);
+  if (!records.length) {
+    const id = await createFolderRecord(name);
+    records = [notes.get(id)];
+  }
+  for (const record of records) if (!!record.pinned !== pinned) await changeNote(record.id, 'pinned', pinned);
 }
 function openFolderDialog(mode = 'create', oldName = '', assignId = null) {
   folderDialogMode = mode;
@@ -293,32 +418,30 @@ function openFolderDialog(mode = 'create', oldName = '', assignId = null) {
   $('folder-dialog-title').textContent = mode === 'rename' ? '重命名分类' : '新建分类';
   $('folder-name').value = mode === 'rename' ? oldName : '';
   $('folder-error').textContent = '';
-  $('folder-manage-list').replaceChildren(...allFolders().map(folder => {
-    const row = document.createElement('div');
-    row.className = 'folder-manage-row';
-    const name = document.createElement('span');
-    name.textContent = folder;
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.textContent = '重命名';
-    edit.onclick = () => openFolderDialog('rename', folder);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'delete';
-    remove.textContent = '删除';
-    remove.onclick = () => deleteFolder(folder);
-    row.append(name, edit, remove);
-    return row;
-  }));
   if (!$('folder-dialog').open) $('folder-dialog').showModal();
   $('folder-name').focus();
+}
+function openFolderManageDialog(folder) {
+  closeCategoryPanel();
+  $('folder-manage-title').textContent = folder;
+  const row = document.createElement('div');
+  row.className = 'folder-manage-row';
+  const edit = document.createElement('button');
+  edit.type = 'button'; edit.textContent = '重命名';
+  edit.onclick = () => { $('folder-manage-dialog').close(); openFolderDialog('rename', folder); };
+  const remove = document.createElement('button');
+  remove.type = 'button'; remove.className = 'delete'; remove.textContent = '删除';
+  remove.onclick = async () => { if (await deleteFolder(folder)) $('folder-manage-dialog').close(); };
+  row.append(edit, remove);
+  $('folder-manage-list').replaceChildren(row);
+  if (!$('folder-manage-dialog').open) $('folder-manage-dialog').showModal();
 }
 async function saveFolder(event) {
   event.preventDefault();
   if (!$('folder-dialog').open) return;
   const name = $('folder-name').value.trim();
   if (!name) { $('folder-error').textContent = '输入分类名称'; return; }
-  if (['all', 'pinned', 'trash', '__new__'].includes(name)) { $('folder-error').textContent = '请换一个分类名称'; return; }
+  if (['all', 'pinned', 'trash', '__new__', '__uncategorized__'].includes(name)) { $('folder-error').textContent = '请换一个分类名称'; return; }
   if (allFolders().includes(name) && name !== renameFrom) { $('folder-error').textContent = '分类已存在'; return; }
   if (folderDialogMode === 'rename') {
     folderCatalog = folderCatalog.filter(folder => folder !== renameFrom);
@@ -329,6 +452,8 @@ async function saveFolder(event) {
     if (view === renameFrom) view = name;
     await persistFolders();
     for (const note of [...notes.values()].filter(note => !isFolderRecord(note) && note.folder === renameFrom)) await changeNote(note.id, 'folder', name);
+    categorySelectMode = false;
+    selectedCategories.clear();
     render();
   } else {
     await createFolderRecord(name);
@@ -337,14 +462,18 @@ async function saveFolder(event) {
   $('folder-dialog').close();
 }
 async function deleteFolder(folder) {
-  if (!confirm(`删除“${folder}”分类？其中的笔记会移到未分类。`)) return;
+  if (!confirm(`删除“${folder}”分类？其中的笔记会移到未分类。`)) return false;
+  await removeFolder(folder);
+  render();
+  return true;
+}
+async function removeFolder(folder) {
   folderCatalog = folderCatalog.filter(name => name !== folder);
   await persistFolders();
   for (const record of [...notes.values()].filter(note => !note.deleted && isFolderRecord(note) && note.title === folder)) await changeNote(record.id, 'deleted', true);
   for (const note of [...notes.values()].filter(note => !isFolderRecord(note) && note.folder === folder)) await changeNote(note.id, 'folder', '');
   if (view === folder) view = 'all';
   $('folder-dialog').close();
-  render();
 }
 function setView(next) {
   discardDraft();
@@ -353,7 +482,7 @@ function setView(next) {
   if (next === 'trash') tab = 'notes';
   current = null;
   $('editor').hidden = true;
-  closeMobileNav();
+  closeCategoryPanel();
   render();
 }
 function setTab(next) {
@@ -363,7 +492,7 @@ function setTab(next) {
   if (next === 'todos') view = 'all';
   current = null;
   $('editor').hidden = true;
-  closeMobileNav();
+  closeCategoryPanel();
   render();
 }
 function exitSelection() {
@@ -394,6 +523,7 @@ function save(id, field, value) {
     notes.set(id, note);
     $('save-state').textContent = '已保存在本机';
     render();
+    if (noteKind(note) === 'todo' && ['title', 'body', 'reminderAt', 'reminderRule', 'reminderLunar', 'deleted', 'purged'].includes(field)) queueReminderSync();
     scheduleSync();
   });
   return writeQueue;
@@ -413,12 +543,15 @@ async function changeNote(id, field, value) {
     if (!String(value).trim()) return;
     draftId = null;
     const kind = notes.get(id)?.kind;
-    if (kind && kind !== 'note') await save(id, 'kind', kind);
     const folder = notes.get(id)?.folder;
-    if (folder && field !== 'folder') await save(id, 'folder', folder);
     const pinned = notes.get(id)?.pinned;
-    if (pinned) await save(id, 'pinned', true);
+    draftCommit = (async () => {
+      if (kind && kind !== 'note') await save(id, 'kind', kind);
+      if (folder && field !== 'folder') await save(id, 'folder', folder);
+      if (pinned) await save(id, 'pinned', true);
+    })();
   }
+  await draftCommit;
   await save(id, field, value);
   if (field !== 'updatedAt') await save(id, 'updatedAt', Date.now());
   if (current === id) {
@@ -429,20 +562,33 @@ async function changeNote(id, field, value) {
 function discardDraft() {
   if (draftId) notes.delete(draftId);
   draftId = null;
+  draftUntouched = false;
 }
 function createNote() {
   const id = crypto.randomUUID();
   discardDraft();
   draftId = id;
-  notes.set(id, { id, title: '', body: '', folder: ['all', 'pinned', 'trash'].includes(view) ? '' : view, pinned: false, deleted: false, purged: false, kind: 'note', reminderAt: 0, background: 'paper', updatedAt: Date.now() });
+  draftUntouched = true;
+  notes.set(id, { id, title: '', body: '', folder: ['all', 'pinned', 'trash', '__uncategorized__'].includes(view) ? '' : view, pinned: false, deleted: false, purged: false, kind: 'note', reminderAt: 0, background: 'paper', updatedAt: Date.now() });
   openEditor(id);
+  $('create-mindmap-inline').hidden = false;
   $('note-title').focus();
+}
+function convertDraftToMindmap() {
+  const note = notes.get(draftId);
+  if (!draftId || !draftUntouched || !note || note.title || note.body) return;
+  const id = draftId;
+  note.kind = 'mindmap';
+  draftUntouched = false;
+  $('editor').hidden = true;
+  current = id;
+  openMindmapEditor(null, null, id, true);
 }
 function createMindmap() {
   const id = crypto.randomUUID();
   discardDraft();
   draftId = id;
-  notes.set(id, { id, title: '', body: '', folder: ['all', 'pinned', 'trash'].includes(view) ? '' : view, pinned: false, deleted: false, purged: false, kind: 'mindmap', reminderAt: 0, background: 'paper', updatedAt: Date.now() });
+  notes.set(id, { id, title: '', body: '', folder: ['all', 'pinned', 'trash', '__uncategorized__'].includes(view) ? '' : view, pinned: false, deleted: false, purged: false, kind: 'mindmap', reminderAt: 0, background: 'paper', updatedAt: Date.now() });
   current = id;
   openMindmapEditor(null, null, id, true);
 }
@@ -459,17 +605,26 @@ function addTodoEditItem(item = { text: '', done: false }, after = null) {
   input.placeholder = '输入待办，回车添加下一项';
   input.setAttribute('aria-label', '待办内容');
   input.onkeydown = event => {
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Enter') { event.preventDefault(); addTodoEditItem(undefined, row).querySelector('input[type=text]').focus(); }
     else if (event.key === 'Backspace' && !input.value && $('todo-edit-items').children.length > 1) {
       event.preventDefault();
       const previous = row.previousElementSibling || row.nextElementSibling;
       row.remove();
+      syncTodoEditorLayout();
       previous?.querySelector('input[type=text]')?.focus();
     }
   };
   row.append(check, input);
   if (after) after.after(row); else $('todo-edit-items').append(row);
+  syncTodoEditorLayout();
   return row;
+}
+function syncTodoEditorLayout() {
+  const title = $('todo-title');
+  const first = $('todo-edit-items').querySelector('input[type=text]')?.value.trim() || '';
+  title.hidden = $('todo-edit-items').children.length < 2 && (!title.value.trim() || title.value.trim() === first);
+  $('todo-dialog').classList.toggle('checklist', !title.hidden);
 }
 function openTodoEditor(id = null) {
   const note = id ? notes.get(id) : null;
@@ -478,9 +633,13 @@ function openTodoEditor(id = null) {
   $('todo-title').value = note?.title || '';
   $('todo-edit-items').replaceChildren();
   const items = note ? todoItems(note) : [];
+  if (note && !items.length && note.title) items.push({ text: note.title, done: false });
   for (const item of items.length ? items : [{ text: '', done: false }]) addTodoEditItem(item);
+  syncTodoEditorLayout();
   const when = note?.reminderAt || 0;
   $('todo-reminder').value = when ? new Date(when - new Date(when).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
+  todoReminderRule = note?.reminderRule || 'none';
+  todoReminderLunar = !!note?.reminderLunar;
   updateTodoDateText();
   $('todo-delete').hidden = !note || note.deleted;
   $('todo-restore').hidden = !note?.deleted;
@@ -490,7 +649,107 @@ function openTodoEditor(id = null) {
 }
 function updateTodoDateText() {
   const value = $('todo-reminder').value;
-  $('todo-date-text').textContent = value ? new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '设置日期';
+  $('todo-date-text').textContent = value ? todoReminderText(new Date(value).getTime(), todoReminderRule, todoReminderLunar).replace(/ ◉$/, '') : '设置提醒';
+}
+function localNotifications() {
+  const capacitor = window.Capacitor;
+  if (!capacitor?.isNativePlatform?.()) return null;
+  if (capacitor.Plugins?.LocalNotifications) return capacitor.Plugins.LocalNotifications;
+  if (typeof capacitor.nativePromise !== 'function') return null;
+  return Object.fromEntries(['checkPermissions', 'requestPermissions', 'checkExactNotificationSetting', 'changeExactNotificationSetting', 'getPending', 'cancel', 'schedule']
+    .map(method => [method, (options = {}) => capacitor.nativePromise('LocalNotifications', method, options)]));
+}
+async function requestExactAlarmIfNeeded() {
+  const plugin = localNotifications();
+  if (!plugin || exactAlarmSettingRequested) return;
+  try {
+    if ((await plugin.checkExactNotificationSetting()).exact_alarm !== 'granted') {
+      exactAlarmSettingRequested = true;
+      toast('请允许精确闹钟，以便准时提醒');
+      await plugin.changeExactNotificationSetting();
+      queueReminderSync();
+    }
+  } catch (error) { console.warn('无法打开精确提醒设置', error); }
+}
+async function ensureNotificationPermission() {
+  const plugin = localNotifications();
+  if (!plugin) return !window.Capacitor?.isNativePlatform?.();
+  try {
+    const status = await plugin.checkPermissions();
+    if (status.display === 'granted') return true;
+    const requested = await plugin.requestPermissions();
+    if (requested.display === 'granted') return true;
+    toast('请允许通知权限后再设置提醒');
+  } catch (error) { console.warn(error); toast('无法启用系统通知'); }
+  return false;
+}
+async function reconcileTodoNotifications() {
+  const plugin = localNotifications();
+  if (!plugin || !key || (await plugin.checkPermissions()).display !== 'granted') return;
+  const pending = (await plugin.getPending()).notifications || [];
+  const previous = pending.filter(notification => notification.extra?.surgeTodoId);
+  if (previous.length) await plugin.cancel({ notifications: previous.map(notification => ({ id: notification.id })) });
+  const upcoming = [...notes.values()].filter(note => !note.deleted && !note.purged && noteKind(note) === 'todo' && note.reminderAt && todoItems(note).some(item => !item.done))
+    .flatMap(note => reminderOccurrences(note.reminderAt, note.reminderRule || 'none', !!note.reminderLunar).map(when => ({ note, when })))
+    .sort((a, b) => a.when - b.when).slice(0, 500);
+  const used = new Set();
+  const notifications = upcoming.map(({ note, when }) => {
+    let id = reminderNotificationId(note.id, when);
+    while (used.has(id)) id = id === 2147483647 ? 1 : id + 1;
+    used.add(id);
+    return {
+      id, title: note.title || '待办提醒', body: todoIsChecklist(note) ? '待办清单提醒' : note.title,
+      schedule: { at: new Date(when), allowWhileIdle: true },
+      autoCancel: true, extra: { surgeTodoId: note.id }
+    };
+  });
+  for (let index = 0; index < notifications.length; index += 50) await plugin.schedule({ notifications: notifications.slice(index, index + 50) });
+}
+function queueReminderSync() {
+  if (!localNotifications()) return;
+  clearTimeout(notificationSyncTimer);
+  notificationSyncTimer = setTimeout(() => {
+    notificationSync = notificationSync.catch(() => {}).then(reconcileTodoNotifications).catch(error => console.warn('待办通知调度失败', error));
+  }, 400);
+}
+function renderReminderCalendar() {
+  const year = reminderMonth.getFullYear(), month = reminderMonth.getMonth();
+  $('reminder-month-label').textContent = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long' }).format(reminderMonth);
+  const days = [];
+  for (let index = 0; index < (new Date(year, month, 1).getDay() + 6) % 7; index++) days.push(document.createElement('span'));
+  const count = new Date(year, month + 1, 0).getDate();
+  for (let day = 1; day <= count; day++) {
+    const date = new Date(year, month, day);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'reminder-day';
+    button.classList.toggle('selected', date.toDateString() === reminderSelectedDate.toDateString());
+    const number = document.createElement('span');
+    number.textContent = String(day);
+    button.append(number);
+    if ($('reminder-lunar').checked) {
+      const lunar = document.createElement('small');
+      lunar.textContent = lunarDayLabel(date);
+      button.append(lunar);
+    }
+    button.onclick = () => { reminderSelectedDate = date; renderReminderCalendar(); };
+    days.push(button);
+  }
+  $('reminder-days').replaceChildren(...days);
+}
+function openReminderDialog() {
+  const value = $('todo-reminder').value;
+  const selected = value ? new Date(value) : new Date(Date.now() + 10 * 60000);
+  selected.setSeconds(0, 0);
+  reminderSelectedDate = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate());
+  reminderMonth = new Date(selected.getFullYear(), selected.getMonth(), 1);
+  $('reminder-time').value = `${String(selected.getHours()).padStart(2, '0')}:${String(selected.getMinutes()).padStart(2, '0')}`;
+  $('reminder-repeat').value = todoReminderRule;
+  $('reminder-lunar').checked = todoReminderLunar;
+  $('reminder-clear').hidden = !value;
+  $('reminder-error').textContent = '';
+  renderReminderCalendar();
+  $('reminder-dialog').showModal();
 }
 async function purgeNote(id) {
   if (!notes.get(id)?.deleted || notes.get(id)?.purged) return;
@@ -502,20 +761,21 @@ async function purgeNote(id) {
   notes.get(id).body = '';
   render();
 }
-function createForTab() { if (tab === 'todos') openTodoEditor(); else $('new-type-dialog').showModal(); }
+function createForTab() { if (tab === 'todos') openTodoEditor(); else createNote(); }
 function openEditor(id) {
   current = id;
   const note = notes.get(id);
   if (!note) return;
   if (noteKind(note) === 'todo') { openTodoEditor(id); return; }
   if (noteKind(note) === 'mindmap') { openMindmapEditor(null, null, id, true); return; }
-  closeMobileNav();
+  closeCategoryPanel();
   $('editor').hidden = false;
   $('editor').dataset.background = note.background || 'paper';
   $('background-strip').hidden = true;
   $('attachment-actions').hidden = true;
   $('format-toolbar').hidden = true;
   $('editor-toolbar').hidden = false;
+  $('create-mindmap-inline').hidden = !(draftId === id && draftUntouched && !note.title && !note.body);
   $('note-title').value = note.title;
   clearAttachmentUrls();
   renderMarkdown(note.body, $('note-body'));
@@ -580,6 +840,7 @@ async function sync() {
       notes = nextState.notes;
       clock = Math.max(clock, nextState.maxClock);
       render();
+      queueReminderSync();
       if (current && !$('editor').contains(document.activeElement)) openEditor(current);
     }
     status('已同步', 'online');
@@ -618,6 +879,9 @@ async function activateVault(candidateKey, ops) {
   $('setup').hidden = true;
   $('app').hidden = false;
   render();
+  if (localNotifications() && [...notes.values()].some(note => !note.deleted && !note.purged && noteKind(note) === 'todo' && note.reminderAt && todoItems(note).some(item => !item.done))) {
+    ensureNotificationPermission().then(allowed => { if (allowed) queueReminderSync(); });
+  } else queueReminderSync();
   if (server && token) sync(); else status('仅本机');
 }
 async function bootstrap() {
@@ -1241,10 +1505,12 @@ function setMindmapMode(mode) {
 }
 function openMindmapEditor(payload = null, card = null, noteId = current, standalone = false) {
   if (!noteId) return;
+  document.activeElement?.blur();
   mindmapTarget = standalone ? { noteId, standalone: true } : card ? { card, noteId, payload } : null;
   mindmapItems = standalone ? outlineFromMindNote(notes.get(noteId)) : payload?.outline?.length ? payload.outline.map(item => ({ depth: Number(item.depth) || 0, text: String(item.text || '') })) : [{ depth: 0, text: '' }];
   mindmapItems[0].depth = 0;
   for (let i = 1; i < mindmapItems.length; i++) mindmapItems[i].depth = Math.max(1, Math.min(4, mindmapItems[i - 1].depth + 1, mindmapItems[i].depth));
+  mindmapOriginal = mindmapState();
   mindmapActive = 0;
   setMindmapMode(standalone ? 'map' : 'outline');
   const note = notes.get(noteId);
@@ -1259,7 +1525,13 @@ function openMindmapEditor(payload = null, card = null, noteId = current, standa
   $('mindmap-dialog').showModal();
   updateMindmapViewport();
   if (standalone) { renderMindmapGraph(true); $('mindmap-map-view').tabIndex = -1; $('mindmap-map-view').focus({ preventScroll: true }); }
-  else focusMindmap(0);
+  else $('mindmap-cancel').focus({ preventScroll: true });
+}
+let mindmapOriginal = '';
+const mindmapState = () => JSON.stringify(mindmapItems.map(item => [item.depth, item.text]));
+function closeMindmapEditor() {
+  if (mindmapState() !== mindmapOriginal && !confirm('思维导图有未保存的更改，确定放弃吗？')) return;
+  $('mindmap-dialog').close();
 }
 async function showHistory() {
   if (!current) return;
@@ -1325,9 +1597,11 @@ $('open-update').onclick = async () => {
   } catch { $('update-status').textContent = '无法打开下载页'; }
 };
 window.surgeHandleBack = () => {
-  const modal = document.querySelector('dialog[open]');
+  const modal = [...document.querySelectorAll('dialog[open]')].at(-1);
   if (modal) {
     if (modal.id === 'record-dialog' && recorder?.state === 'recording') $('record-cancel').click();
+    else if (modal.id === 'mindmap-dialog') closeMindmapEditor();
+    else if (modal.id === 'drawing-dialog') closeDrawingEditor();
     else modal.close();
     return true;
   }
@@ -1335,14 +1609,16 @@ window.surgeHandleBack = () => {
   if (!$('history').hidden) { $('history').hidden = true; return true; }
   if (!$('editor').hidden) { $('back').click(); return true; }
   if (selectMode) { exitSelection(); render(); return true; }
-  if (!$('mobile-nav').hidden) { closeMobileNav(); return true; }
+  if (!$('category-panel').hidden) {
+    if (categorySelectMode) { categorySelectMode = false; selectedCategories.clear(); renderCategoryPanel(allFolders()); }
+    else closeCategoryPanel();
+    return true;
+  }
   return false;
 };
 $('new-note').onclick = createForTab;
 $('fab').onclick = createForTab;
-$('new-text-note').onclick = () => { $('new-type-dialog').close(); createNote(); };
-$('new-mind-note').onclick = () => { $('new-type-dialog').close(); createMindmap(); };
-$('new-type-cancel').onclick = () => $('new-type-dialog').close();
+$('create-mindmap-inline').onclick = convertDraftToMindmap;
 $('clear-trash').onclick = async () => {
   const ids = [...notes.values()].filter(note => note.deleted && !note.purged && !isFolderRecord(note)).map(note => note.id);
   if (!ids.length || !confirm(`清空回收站中的 ${ids.length} 项？`)) return;
@@ -1350,23 +1626,52 @@ $('clear-trash').onclick = async () => {
   render();
 };
 $('todo-close').onclick = () => $('todo-dialog').close();
-$('todo-reminder').onchange = updateTodoDateText;
+$('todo-dialog').onclick = event => { if (event.target === $('todo-dialog')) $('todo-dialog').close(); };
+$('todo-reminder-button').onclick = openReminderDialog;
+$('reminder-prev').onclick = () => { reminderMonth = new Date(reminderMonth.getFullYear(), reminderMonth.getMonth() - 1, 1); renderReminderCalendar(); };
+$('reminder-next').onclick = () => { reminderMonth = new Date(reminderMonth.getFullYear(), reminderMonth.getMonth() + 1, 1); renderReminderCalendar(); };
+$('reminder-lunar').onchange = renderReminderCalendar;
+$('reminder-cancel').onclick = () => $('reminder-dialog').close();
+$('reminder-clear').onclick = () => {
+  $('todo-reminder').value = '';
+  todoReminderRule = 'none';
+  todoReminderLunar = false;
+  updateTodoDateText();
+  $('reminder-dialog').close();
+};
+$('reminder-confirm').onclick = () => {
+  const [hour, minute] = $('reminder-time').value.split(':').map(Number);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) { $('reminder-error').textContent = '选择提醒时间'; return; }
+  const date = new Date(reminderSelectedDate.getFullYear(), reminderSelectedDate.getMonth(), reminderSelectedDate.getDate(), hour, minute);
+  const rule = $('reminder-repeat').value;
+  if (!reminderOccurrences(date.getTime(), rule, $('reminder-lunar').checked).length) { $('reminder-error').textContent = '选择未来的提醒时间'; return; }
+  $('todo-reminder').value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  todoReminderRule = rule;
+  todoReminderLunar = $('reminder-lunar').checked;
+  updateTodoDateText();
+  $('reminder-dialog').close();
+};
 $('todo-add-item').onclick = () => addTodoEditItem().querySelector('input[type=text]').focus();
 $('todo-done').onclick = async () => {
   const items = [...$('todo-edit-items').children].map(row => ({ done: row.querySelector('input[type=checkbox]').checked, text: row.querySelector('input[type=text]').value.trim() })).filter(item => item.text);
-  const title = $('todo-title').value.trim() || items[0]?.text || '';
+  const checklist = items.length > 1 || (!$('todo-title').hidden && !!$('todo-title').value.trim() && $('todo-title').value.trim() !== items[0]?.text);
+  const title = checklist ? ($('todo-title').value.trim() || '待办清单') : (items[0]?.text || '');
   if (!title) { $('todo-dialog').close(); return; }
   const id = editingTodoId || crypto.randomUUID();
   const when = $('todo-reminder').value ? new Date($('todo-reminder').value).getTime() : 0;
+  if (when && !await ensureNotificationPermission()) return;
   if (noteKind(notes.get(id) || {}) !== 'todo' || !editingTodoId) await save(id, 'kind', 'todo');
   if (notes.get(id)?.title !== title) await changeNote(id, 'title', title);
   const body = todoBody(items);
   if (notes.get(id)?.body !== body) await changeNote(id, 'body', body);
   if ((notes.get(id)?.reminderAt || 0) !== when) await changeNote(id, 'reminderAt', when);
+  if ((notes.get(id)?.reminderRule || 'none') !== (when ? todoReminderRule : 'none')) await changeNote(id, 'reminderRule', when ? todoReminderRule : 'none');
+  if (!!notes.get(id)?.reminderLunar !== (when && todoReminderLunar)) await changeNote(id, 'reminderLunar', !!(when && todoReminderLunar));
   if (!notes.get(id)?.updatedAt) await changeNote(id, 'updatedAt', Date.now());
-  todoExpanded.add(id);
+  if (checklist) todoExpanded.add(id); else todoExpanded.delete(id);
   $('todo-dialog').close();
   render();
+  if (when) requestExactAlarmIfNeeded();
 };
 $('todo-delete').onclick = async () => { if (editingTodoId) await changeNote(editingTodoId, 'deleted', true); $('todo-dialog').close(); };
 $('todo-restore').onclick = async () => { if (editingTodoId) await changeNote(editingTodoId, 'deleted', false); $('todo-dialog').close(); };
@@ -1379,8 +1684,16 @@ $('batch-pin').onclick = async () => {
   exitSelection(); render();
 };
 $('batch-move').onclick = () => openMoveDialog([...selectedNotes]);
+$('batch-restore').onclick = async () => {
+  for (const id of [...selectedNotes]) await changeNote(id, 'deleted', false);
+  exitSelection(); render();
+};
 $('batch-delete').onclick = async () => {
-  for (const id of [...selectedNotes]) await changeNote(id, 'deleted', true);
+  const ids = [...selectedNotes];
+  if (view === 'trash') {
+    if (!confirm(`彻底删除选中的 ${ids.length} 项？此操作无法撤销。`)) return;
+    for (const id of ids) await purgeNote(id);
+  } else for (const id of ids) await changeNote(id, 'deleted', true);
   exitSelection(); render();
 };
 $('move-note').onclick = () => openMoveDialog([current]);
@@ -1392,6 +1705,9 @@ $('move-save').onclick = async () => {
   moveTargets = [];
   exitSelection(); render();
 };
+for (const id of ['show-format', 'hide-format']) {
+  $(id).addEventListener('pointerdown', event => event.preventDefault());
+}
 $('show-format').onclick = () => { $('editor-toolbar').hidden = true; $('format-toolbar').hidden = false; };
 $('hide-format').onclick = () => { $('format-toolbar').hidden = true; $('editor-toolbar').hidden = false; };
 document.querySelectorAll('[data-format]').forEach(button => button.onclick = () => applyFormat(button.dataset.format));
@@ -1454,10 +1770,36 @@ document.querySelectorAll('[data-attachment-action]').forEach(button => button.o
   }
 });
 $('trash-back').onclick = () => setView('all');
-$('mobile-folders').onclick = () => { const open = $('mobile-nav').hidden; $('mobile-nav').hidden = !open; $('mobile-folders').setAttribute('aria-expanded', String(open)); };
+$('mobile-folders').onclick = openCategoryPanel;
 $('mobile-settings').onclick = showSettings;
 $('layout-toggle').onclick = () => { layout = layout === 'list' ? 'grid' : 'list'; localStorage.setItem('surge-layout', layout); render(); };
-$('manage-categories').onclick = () => openFolderDialog();
+$('category-back').onclick = () => {
+  if (categorySelectMode) { categorySelectMode = false; selectedCategories.clear(); renderCategoryPanel(allFolders()); }
+  else closeCategoryPanel();
+};
+$('category-select-toggle').onclick = () => {
+  const folders = allFolders();
+  if (!categorySelectMode) categorySelectMode = true;
+  else if (selectedCategories.size === folders.length) selectedCategories.clear();
+  else selectedCategories = new Set(folders);
+  renderCategoryPanel(folders);
+};
+$('category-create').onclick = () => openFolderDialog();
+$('category-edit').onclick = () => { if (selectedCategories.size === 1) openFolderDialog('rename', [...selectedCategories][0]); };
+$('category-delete').onclick = async () => {
+  const folders = [...selectedCategories];
+  if (!folders.length || !confirm(`删除选中的 ${folders.length} 个分类？其中的笔记会移到未分类。`)) return;
+  for (const folder of folders) await removeFolder(folder);
+  categorySelectMode = false; selectedCategories.clear(); render();
+};
+$('category-pin').onclick = async () => {
+  const folders = [...selectedCategories];
+  if (!folders.length) return;
+  const pin = !folders.every(categoryPinned);
+  for (const folder of folders) await setCategoryPinned(folder, pin);
+  categorySelectMode = false; selectedCategories.clear(); render();
+};
+$('folder-manage-close').onclick = () => $('folder-manage-dialog').close();
 let folderComposing = false, saveAfterComposition = false;
 $('folder-name').addEventListener('compositionstart', () => { folderComposing = true; });
 $('folder-name').addEventListener('compositionend', () => {
@@ -1472,17 +1814,10 @@ $('folder-dialog').querySelector('form').onsubmit = event => {
   else saveFolder(event);
 };
 $('folder-cancel').onclick = () => $('folder-dialog').close();
-$('search').onfocus = closeMobileNav;
+$('search').onfocus = closeCategoryPanel;
 $('search').oninput = event => { query = event.target.value.toLowerCase().trim(); render(); };
 document.querySelectorAll('.nav').forEach(button => button.onclick = () => setView(button.dataset.view));
-document.querySelectorAll('[data-mobile-view]').forEach(button => button.onclick = () => setView(button.dataset.mobileView));
 document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => setTab(button.dataset.tab));
-$('mobile-folder').onchange = event => {
-  if (event.target.value === '__new__') {
-    openFolderDialog();
-    render();
-  } else setView(event.target.value || 'all');
-};
 $('add-folder').onclick = () => openFolderDialog();
 let composingTitle = false, composingBody = false;
 function applyMarkdownShortcut() {
@@ -1547,9 +1882,9 @@ function applyMarkdownShortcut() {
   return false;
 }
 $('note-title').addEventListener('compositionstart', () => { composingTitle = true; });
-$('note-title').addEventListener('compositionend', event => { composingTitle = false; if (current) changeNote(current, 'title', event.target.value); });
+$('note-title').addEventListener('compositionend', event => { composingTitle = false; if (current) { if (draftId === current && event.target.value) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } changeNote(current, 'title', event.target.value); } });
 $('note-body').addEventListener('compositionstart', () => { composingBody = true; });
-$('note-body').addEventListener('compositionend', () => { composingBody = false; applyMarkdownShortcut(); saveEditorBody(); });
+$('note-body').addEventListener('compositionend', () => { composingBody = false; if (draftId === current && $('note-body').textContent.trim()) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } applyMarkdownShortcut(); saveEditorBody(); });
 $('note-body').addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey) handleStructuredEdit(event, 'enter');
   else if (event.key === 'Backspace') handleStructuredEdit(event, 'backspace');
@@ -1563,8 +1898,8 @@ document.addEventListener('selectionchange', () => {
   if (selection.rangeCount && $('note-body').contains(selection.anchorNode)) bodyRange = selection.getRangeAt(0).cloneRange();
 });
 $('note-body').addEventListener('change', event => { if (event.target.matches('input[type="checkbox"]')) saveEditorBody(); });
-$('note-title').oninput = event => { if (current && !composingTitle) changeNote(current, 'title', event.target.value); };
-$('note-body').oninput = () => { if (current && !composingBody) { applyMarkdownShortcut(); saveEditorBody(); } };
+$('note-title').oninput = event => { if (current && !composingTitle) { if (draftId === current && event.target.value) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } changeNote(current, 'title', event.target.value); } };
+$('note-body').oninput = () => { if (current && !composingBody) { if (draftId === current && $('note-body').textContent.trim()) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } applyMarkdownShortcut(); saveEditorBody(); } };
 $('note-folder').onchange = event => {
   if (!current) return;
   if (event.target.value === '__new__') { const id = current; render(); openFolderDialog('create', '', id); }
@@ -1586,21 +1921,25 @@ for (const input of ['image', 'camera', 'file', 'audio']) {
     if (file) await storeFile(file, input);
   };
 }
-document.querySelectorAll('[data-insert]').forEach(button => button.onclick = () => {
-  const action = button.dataset.insert;
-  if (action === 'text') focusRange();
-  else if (action === 'task') insertTask();
-  else if (action === 'table') insertBlock(tableNode());
-  else if (action === 'image') $('image-source-dialog').showModal();
-  else if (action === 'file') $('pick-file').click();
-  else if (action === 'audio') $('record-dialog').showModal();
-  else if (action === 'drawing') openDrawingEditor();
-  else if (action === 'mindmap') openMindmapEditor();
+document.querySelectorAll('[data-insert]').forEach(button => {
+  button.addEventListener('pointerdown', event => { if (['image', 'drawing', 'mindmap'].includes(button.dataset.insert)) event.preventDefault(); });
+  button.onclick = () => {
+    const action = button.dataset.insert;
+    if (['image', 'drawing', 'mindmap'].includes(action)) document.activeElement?.blur();
+    if (action === 'text') focusRange();
+    else if (action === 'task') insertTask();
+    else if (action === 'table') insertBlock(tableNode());
+    else if (action === 'image') $('image-source-dialog').showModal();
+    else if (action === 'file') $('pick-file').click();
+    else if (action === 'audio') $('record-dialog').showModal();
+    else if (action === 'drawing') openDrawingEditor();
+    else if (action === 'mindmap') openMindmapEditor();
+  };
 });
 $('image-from-album').onclick = () => { $('image-source-dialog').close(); $('pick-image').click(); };
 $('image-from-camera').onclick = () => { $('image-source-dialog').close(); $('pick-camera').click(); };
 $('image-source-cancel').onclick = () => $('image-source-dialog').close();
-$('mindmap-cancel').onclick = () => $('mindmap-dialog').close();
+$('mindmap-cancel').onclick = closeMindmapEditor;
 $('mindmap-more').onclick = () => $('mindmap-more-menu').hidden = !$('mindmap-more-menu').hidden;
 $('mindmap-history-note').onclick = () => { $('mindmap-dialog').close(); showHistory(); };
 $('mindmap-pin-note').onclick = async () => {
@@ -1653,6 +1992,8 @@ $('mindmap-dialog').addEventListener('close', () => {
   if (mindmapTarget?.standalone && draftId === mindmapTarget.noteId) { discardDraft(); current = null; render(); }
   mindmapTarget = null;
 });
+// Native back and Escape both pass through the same unsaved-change guard.
+$('mindmap-dialog').addEventListener('cancel', event => { event.preventDefault(); closeMindmapEditor(); });
 const canvas = $('drawing-canvas');
 const context = canvas.getContext('2d');
 let drawing = false, drawingTool = 'pencil', drawingTarget = null, drawingHistory = [], drawingHistoryIndex = -1, drawingRestoring = false;
@@ -1689,6 +2030,11 @@ function snapshotDrawing() {
   drawingHistoryIndex = drawingHistory.length - 1;
   updateDrawingHistoryButtons();
 }
+function closeDrawingEditor() {
+  if (drawingHistory[drawingHistoryIndex] !== drawingHistory[0] && !confirm('画板有未保存的更改，确定放弃吗？')) return;
+  $('drawing-dialog').close();
+}
+$('drawing-dialog').addEventListener('cancel', event => { event.preventDefault(); closeDrawingEditor(); });
 async function restoreDrawing(index) {
   if (drawingRestoring || index < 0 || index >= drawingHistory.length) return;
   drawingRestoring = true;
@@ -1780,7 +2126,7 @@ $('drawing-size').oninput = event => { $('drawing-size-value').textContent = eve
 $('drawing-undo').onclick = () => restoreDrawing(drawingHistoryIndex - 1);
 $('drawing-redo').onclick = () => restoreDrawing(drawingHistoryIndex + 1);
 $('drawing-clear').onclick = () => { context.globalAlpha = 1; context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height); snapshotDrawing(); };
-$('drawing-cancel').onclick = () => $('drawing-dialog').close();
+$('drawing-cancel').onclick = closeDrawingEditor;
 $('drawing-save').onclick = async () => {
   const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
   if (!blob) { toast('绘图保存失败'); return; }
@@ -1835,6 +2181,6 @@ window.visualViewport?.addEventListener('resize', () => { updateEditorViewport()
 window.visualViewport?.addEventListener('scroll', () => { updateEditorViewport(); updateMindmapViewport(); updateTodoViewport(); });
 window.addEventListener('online', sync);
 window.addEventListener('popstate', () => { $('settings-panel').hidden = true; });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { sync(); queueReminderSync(); } });
 setInterval(sync, 30000);
 await bootstrap();

@@ -1,6 +1,6 @@
 const enc = new TextEncoder();
 const dec = new TextDecoder();
-export const fields = ['title', 'body', 'folder', 'pinned', 'deleted', 'purged', 'kind', 'reminderAt', 'background', 'updatedAt'];
+export const fields = ['title', 'body', 'folder', 'pinned', 'deleted', 'purged', 'kind', 'reminderAt', 'reminderRule', 'reminderLunar', 'background', 'updatedAt'];
 export const bytesToUrl = bytes => {
   let binary = '';
   for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
@@ -63,7 +63,7 @@ export async function materialize(ops, key) {
   for (const op of ops) {
     maxClock = Math.max(maxClock, op.clock);
     let note = notes.get(op.noteId);
-    if (!note) { note = { id: op.noteId, title: '', body: '', folder: '', pinned: false, deleted: false, purged: false, kind: 'note', reminderAt: 0, background: 'paper', updatedAt: 0, stamps: {} }; notes.set(op.noteId, note); }
+    if (!note) { note = { id: op.noteId, title: '', body: '', folder: '', pinned: false, deleted: false, purged: false, kind: 'note', reminderAt: 0, reminderRule: 'none', reminderLunar: false, background: 'paper', updatedAt: 0, stamps: {} }; notes.set(op.noteId, note); }
     if (wins(op, note.stamps[op.field])) {
       note[op.field] = await decryptValue(key, op.ciphertext);
       note.stamps[op.field] = { clock: op.clock, actor: op.actor };

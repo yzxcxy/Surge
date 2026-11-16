@@ -67,6 +67,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .note-card footer { display: flex; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 14px; color: #a3a3a3; font-size: 12px; }
 .note-card .pin { color: #777; }
 .note-card .pin svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.note-card { position: relative; transition: transform .18s ease, box-shadow .18s ease, background .18s ease; }
+.note-card:active { transform: scale(.986); }
+.note-card.selecting { padding-left: 54px; }
+.select-circle { position: absolute; top: 20px; left: 17px; width: 22px; height: 22px; border: 2px solid #aaa; border-radius: 50%; background: #fff; }
+.note-card.selected .select-circle { border-color: #f5b600; background: #f5b600; box-shadow: inset 0 0 0 4px #fff; }
+.batch-bar { position: fixed; z-index: 5; right: 20px; bottom: 20px; left: max(252px, calc((100vw - 820px) / 2)); display: flex; align-items: center; gap: 12px; min-height: 66px; padding: 8px 12px; border: 1px solid #e9e9e9; border-radius: 18px; background: #fffffff2; box-shadow: 0 10px 40px #0002; backdrop-filter: blur(22px); }
+.batch-bar span { flex: 1; color: #555; font-size: 13px; }
+.batch-bar button { display: grid; place-items: center; flex: none; width: 42px; height: 42px; padding: 8px; border: 0; border-radius: 12px; background: none; color: #333; font-size: 28px; }
+.batch-bar button:active { background: #f2f2f2; }
+.batch-bar svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .todo-list { display: grid; gap: 12px; }
 .todo-item { display: flex; align-items: flex-start; gap: 16px; min-height: 75px; padding: 19px 22px; border-radius: 18px; background: #fff; }
 .todo-item input { width: 21px; height: 21px; margin: 3px 0 0; accent-color: #242424; }
@@ -101,20 +111,35 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 #note-body code { padding: 2px 4px; border-radius: 4px; background: #f1f1f1; font-size: .88em; }
 #note-body pre { overflow-x: auto; margin: 0 0 1.15em; padding: 12px; border-radius: 8px; background: #f5f5f5; font-size: .85em; line-height: 1.5; }
 #note-body pre code { padding: 0; background: none; font-size: inherit; }
-#note-body .rich-table { width: 100%; border-collapse: collapse; margin: 8px 0 24px; font-size: .9em; }
+#note-body .rich-table { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 8px 0 24px; font-size: .9em; }
 #note-body .rich-table th, #note-body .rich-table td { min-width: 76px; padding: 8px 10px; border: 1px solid #dedede; text-align: left; vertical-align: top; }
+#note-body .rich-table td:empty::before { content: '\200b'; }
 #note-body .rich-table th { background: #f5f5f5; font-weight: 600; }
-#note-body .rich-formula { overflow-x: auto; margin: 12px 0 22px; padding: 14px 8px; border-radius: 10px; background: #f8f8f8; text-align: center; cursor: pointer; }
 #note-body .rich-attachment { display: flex; flex-direction: column; align-items: flex-start; width: fit-content; max-width: 100%; margin: 12px 0 22px; padding: 10px; border: 1px solid #e8e8e8; border-radius: 11px; background: #fafafa; color: #666; font-size: 13px; line-height: 1.5; }
 #note-body .rich-attachment img { display: block; max-width: min(100%, 500px); max-height: 420px; margin-bottom: 6px; border-radius: 6px; object-fit: contain; }
 #note-body .rich-attachment audio { max-width: 100%; margin-top: 6px; }
 #note-body .rich-attachment button, #note-body .rich-attachment a { border: 0; padding: 5px 0; background: none; color: #4477a6; }
+#note-body .rich-attachment.image-attachment { display: block; width: min(calc(100% * var(--image-scale, 1)), calc(500px * var(--image-scale, 1))); max-width: 100%; padding: 0; border: 0; border-radius: 10px; background: transparent; cursor: pointer; }
+#note-body .rich-attachment.image-attachment img { display: block; width: 100%; max-width: none; max-height: 520px; margin: 0; border-radius: 10px; object-fit: contain; }
+#note-body .rich-attachment.image-attachment figcaption { margin-top: 7px; color: #777; font-size: 13px; }
+.attachment-caption-input { width: 100%; margin-top: 8px; padding: 9px; border: 1px solid #ddd; border-radius: 8px; background: #fff; font-size: 14px; }
+.attachment-actions { position: fixed; z-index: 12; display: flex; gap: 2px; padding: 7px; border: 1px solid #eee; border-radius: 16px; background: #fffffff2; box-shadow: 0 9px 28px #0002; backdrop-filter: blur(18px); }
+.attachment-actions button { display: grid; place-items: center; width: 40px; height: 40px; padding: 8px; border: 0; border-radius: 10px; background: none; color: #333; }
+.attachment-actions button:active { background: #fff3ce; }
+.attachment-actions svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .editor-toolbar { display: flex; gap: 7px; flex: none; width: 100%; min-height: 65px; overflow-x: auto; align-items: center; padding: 7px max(20px, calc((100vw - 820px) / 2)) calc(7px + env(safe-area-inset-bottom)); border-top: 1px solid #ececec; background: #ffffffeb; scrollbar-width: none; }
 .editor-toolbar::-webkit-scrollbar { display: none; }
 .editor-toolbar button { display: grid; place-items: center; flex: none; width: 52px; height: 48px; padding: 8px; border: 0; border-radius: 12px; background: none; color: #323232; }
 .editor-toolbar button svg { width: 27px; height: 27px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .editor-toolbar button circle:not(:first-child) { stroke: currentColor; }
 .editor-toolbar button:active { background: #fff5d6; color: #d59a00; }
+#show-format, #hide-format { position: sticky; right: 0; z-index: 1; margin-left: auto; background: #fffffff0; box-shadow: -6px 0 12px #fff9; }
+.format-toolbar button { font-size: 19px; font-weight: 500; }
+.format-toolbar button:first-child, .format-toolbar button:nth-child(2) { font-size: 16px; font-weight: 700; }
+.format-toolbar button:last-child { font-size: 31px; font-weight: 300; }
+.background-strip { position: absolute; z-index: 5; right: 0; bottom: calc(65px + env(safe-area-inset-bottom)); left: 0; display: flex; gap: 11px; padding: 15px 20px; overflow-x: auto; border-top: 1px solid #eee; background: #ffffffed; box-shadow: 0 -8px 24px #0000000a; scrollbar-width: none; }
+.background-strip button { flex: none; width: 68px; height: 82px; border: 1px solid #ddd; border-radius: 13px; background: #fff; box-shadow: 0 2px 8px #0000000a; }
+.background-strip button.active { outline: 2px solid #e6a900; outline-offset: 2px; }
 .more-menu { position: absolute; z-index: 5; top: 65px; right: 20px; display: grid; min-width: 180px; padding: 7px; border: 1px solid #eee; border-radius: 14px; background: #fff; box-shadow: 0 12px 35px #00000018; }
 .more-menu button { padding: 11px 12px; border: 0; border-radius: 8px; background: none; color: #333; text-align: left; font-size: 14px; }
 .more-menu button:hover { background: #f5f5f5; }
@@ -157,6 +182,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .entry-dialog::backdrop { background: #0005; backdrop-filter: blur(5px); }
 .entry-dialog h2 { margin: 0 0 18px; font-size: 19px; }
 .entry-dialog input, .entry-dialog textarea { width: 100%; padding: 11px 12px; border: 1px solid #ddd; border-radius: 9px; background: #fff; color: #222; font-size: 14px; }
+#move-folder { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 10px; background: #fff; }
+.emoji-dialog { width: min(440px, calc(100vw - 24px)); }
+.emoji-dialog #emoji-search { margin-bottom: 12px; font-size: 15px; }
+.emoji-grid { max-height: min(50dvh, 410px); overflow-y: auto; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .dialog-actions button { padding: 9px 15px; border: 0; border-radius: 9px; background: #f1f1f1; color: #333; }
 .dialog-actions button:last-child { background: #222; color: #fff; }
@@ -198,11 +227,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .drawing-size-preview { flex: none; width: 14px; height: 14px; border-radius: 50%; background: #333; }
 .drawing-size input { flex: 1; min-width: 0; accent-color: #f4ae00; }
 .drawing-size output { min-width: 17px; color: #888; font-size: 12px; text-align: right; }
-#mindmap-outline { min-height: 190px; resize: vertical; line-height: 1.5; }
+.mindmap-dialog { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: #fff; color: #222; }
+.mindmap-dialog[open] { display: flex; flex-direction: column; }
+.mindmap-dialog::backdrop { background: #fff; }
+.mindmap-dialog header { display: flex; align-items: center; justify-content: space-between; flex: none; height: 74px; padding: 10px 20px; border-bottom: 1px solid #f1f1f1; }
+.mindmap-dialog h2 { margin: 0; font-size: 19px; font-weight: 600; }
+.mindmap-dialog header button { width: 40px; height: 40px; border: 0; background: none; color: #222; font-size: 27px; }
+.mindmap-content { flex: 1; min-height: 0; width: min(820px, 100%); margin: 0 auto; padding: 22px 20px 60px; overflow-y: auto; }
+.mindmap-items { display: grid; gap: 4px; }
+.mindmap-row { display: flex; align-items: center; gap: 9px; min-height: 49px; margin-left: calc(var(--depth, 0) * 27px); border-bottom: 1px solid #f2f2f2; }
+.mindmap-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #777; }
+.mindmap-row:first-child .mindmap-dot { width: 10px; height: 10px; background: #ffc029; }
+.mindmap-row input { width: 100%; min-width: 0; padding: 10px 4px; border: 0; outline: 0; background: none; color: #242424; font-size: 17px; }
+.mindmap-row input::placeholder { color: #b0b0b0; }
+.mindmap-add { margin: 20px 0 0; padding: 9px 4px; border: 0; background: none; color: #777; font-size: 14px; }
+.mindmap-preview { overflow: auto; }
+.mindmap-preview svg { display: block; max-width: none; }
+.mindmap-dialog footer { display: flex; justify-content: center; gap: 35px; flex: none; min-height: 64px; padding: 9px 20px calc(9px + env(safe-area-inset-bottom)); border-top: 1px solid #eee; background: #fff; }
+.mindmap-dialog footer button { display: grid; place-items: center; width: 45px; height: 45px; border: 0; border-radius: 11px; background: none; color: #333; font-size: 25px; }
+.mindmap-dialog footer svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 .emoji-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .emoji-grid button { padding: 10px 4px; border: 0; border-radius: 9px; background: #f4f4f4; font-size: 24px; }
-#password-dialog label { display: block; margin: 13px 0; color: #666; font-size: 13px; }
-#password-dialog label input { display: block; margin-top: 6px; }
 #record-status { color: #888; font-size: 14px; }
 #toast { position: fixed; left: 50%; bottom: 110px; z-index: 100; transform: translateX(-50%); padding: 9px 15px; border-radius: 11px; background: #222e; color: #fff; font-size: 13px; }
 
@@ -239,8 +284,28 @@ body.glass .entry-dialog { background: #ffffffe6; backdrop-filter: blur(22px); -
 body.glass .drawing-dialog { background: #fff; }
 body.glass .setup-screen { background: radial-gradient(circle at 18% 18%, #dae8f9, transparent 40%), radial-gradient(circle at 85% 80%, #f4e2d4, transparent 42%), #edf0f3; }
 body.glass .setup-card { background: #ffffffb8; backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+.editor[data-background="paper"] { background: #fff; }
+.editor[data-background="warm"], .note-card[data-background="warm"], .background-strip button[data-background="warm"] { background: linear-gradient(140deg, #fff9ea, #f8efd9); }
+.editor[data-background="rose"], .note-card[data-background="rose"], .background-strip button[data-background="rose"] { background: linear-gradient(140deg, #fff7f5, #f8e9e8); }
+.editor[data-background="sage"], .note-card[data-background="sage"], .background-strip button[data-background="sage"] { background: linear-gradient(140deg, #f6faf4, #e6f0e3); }
+.editor[data-background="sky"], .note-card[data-background="sky"], .background-strip button[data-background="sky"] { background: linear-gradient(140deg, #f4f9ff, #e3eef8); }
+.editor[data-background="lavender"], .note-card[data-background="lavender"], .background-strip button[data-background="lavender"] { background: linear-gradient(140deg, #faf8ff, #eee9f8); }
+body.glass .editor[data-background="paper"] { background: radial-gradient(circle at 12% 9%, #e9f1fa 0, transparent 36%), radial-gradient(circle at 88% 82%, #f9f2ec 0, transparent 45%), #f8fafb; }
+body.glass .note-card[data-background="warm"] { background: #fff6dfce; }
+body.glass .note-card[data-background="rose"] { background: #fbeae8ce; }
+body.glass .note-card[data-background="sage"] { background: #eaf4e8ce; }
+body.glass .note-card[data-background="sky"] { background: #e8f2fbce; }
+body.glass .note-card[data-background="lavender"] { background: #f0ebf9ce; }
+.background-strip button[data-background="paper"] { background: #fff; }
+.background-strip button::after { content: ''; display: block; width: 38px; height: 2px; margin: 22px auto 0; background: #aaa7; box-shadow: 0 11px #aaa5, 0 22px #aaa3; }
+.editor:not([hidden]), .settings-panel:not([hidden]), .entry-dialog[open], .attachment-actions:not([hidden]), .background-strip:not([hidden]) { animation: surge-appear .18s ease-out; }
+@keyframes surge-appear { from { opacity: .65; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 
 @media (max-width: 800px) {
+  .emoji-dialog { position: fixed; top: auto; right: 0; bottom: 0; left: 0; width: 100%; max-height: 80dvh; margin: 0; padding-bottom: calc(20px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; }
+  .batch-bar { right: 0; bottom: 0; left: 0; min-height: calc(70px + env(safe-area-inset-bottom)); padding: 8px 17px calc(8px + env(safe-area-inset-bottom)); border-radius: 0; }
+  .batch-bar button { width: 42px; }
   .sidebar, .desktop-actions, #breadcrumbs { display: none; }
   .topbar { height: 87px; padding: 20px 24px 0; border: 0; }
   html.native-app .topbar { height: 106px; padding-top: 40px; }
@@ -291,6 +356,7 @@ body.glass .setup-card { background: #ffffffb8; backdrop-filter: blur(24px); -we
   .editor-toolbar { min-height: 63px; padding: 7px 14px calc(7px + env(safe-area-inset-bottom)); }
   .more-menu { top: 75px; right: 19px; }
   html.native-app .drawing-header { padding-top: 42px; min-height: 100px; }
+  html.native-app .mindmap-dialog header { padding-top: 40px; height: 106px; }
   .drawing-tools { justify-content: flex-start; }
   html.native-app .drawing-tools { height: 120px; padding-bottom: 24px; justify-content: flex-start; }
   html.native-app .drawing-popover { bottom: 128px; }

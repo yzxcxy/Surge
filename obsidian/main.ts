@@ -2,7 +2,7 @@ import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder }
 import { deriveKey, makeOp, materialize, fetchInfo, exchange } from '../web/core.mjs';
 
 type Op = { id:string; noteId:string; field:string; clock:number; actor:string; ciphertext:string; localPending?:boolean };
-type Note = { id:string; title:string; body:string; folder:string; pinned:boolean; deleted:boolean; updatedAt:number };
+type Note = { id:string; title:string; body:string; folder:string; pinned:boolean; deleted:boolean; background:string; updatedAt:number };
 type State = { server:string; token:string; salt:string; actor:string; clock:number; cursor:number; ops:Op[] };
 const initial = ():State => ({ server:'', token:'', salt:'', actor:crypto.randomUUID(), clock:0, cursor:0, ops:[] });
 const clean = (op:Op) => ({ id:op.id, noteId:op.noteId, field:op.field, clock:op.clock, actor:op.actor, ciphertext:op.ciphertext });
@@ -57,7 +57,7 @@ export default class SurgePlugin extends Plugin {
     if(!this.key) return;
     const op=await makeOp(this.key,this.state.actor,++this.state.clock,id,field,value) as Op;
     op.localPending=true; this.state.ops.push(op); await this.save();
-    const note=this.notes.get(id) || { id,title:'',body:'',folder:'',pinned:false,deleted:false,updatedAt:0 };
+    const note=this.notes.get(id) || { id,title:'',body:'',folder:'',pinned:false,deleted:false,background:'paper',updatedAt:0 };
     (note as any)[field]=value; this.notes.set(id,note);
   }
   queueLocal(file:TFile) { if(!this.key || !file.path.startsWith('Surge/') || file.extension!=='md' || this.applying.has(file.path)) return; clearTimeout(this.timers.get(file.path)); this.timers.set(file.path,window.setTimeout(()=>{ this.timers.delete(file.path); this.fromFile(file).then(()=>this.sync()).catch(e=>new Notice(`Surge: ${e.message}`)); },350)); }

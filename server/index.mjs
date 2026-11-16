@@ -40,7 +40,7 @@ let writeQueue = Promise.resolve();
 function validOp(op) {
   return op && typeof op === 'object' &&
     /^[a-f0-9-]{36}$/.test(op.id) && /^[a-f0-9-]{36}$/.test(op.noteId) &&
-    ['title','body','folder','pinned','deleted','updatedAt'].includes(op.field) &&
+    ['title','body','folder','pinned','deleted','background','updatedAt'].includes(op.field) &&
     Number.isSafeInteger(op.clock) && op.clock > 0 && op.clock < 1e15 &&
     /^[a-f0-9-]{36}$/.test(op.actor) &&
     typeof op.ciphertext === 'string' && /^[A-Za-z0-9_-]{16,200000}$/.test(op.ciphertext);

@@ -4,11 +4,11 @@
 
 ## 构建与交付物
 
-- 真机测试包：[surge-android-device-test.apk](https://github.com/yzxcxy/Surge/releases/download/v1.1.1/surge-android-device-test.apk)，由 `assembleRelease` 的未签名 APK 对齐后，以独立的本机测试密钥签名。包名 `org.surge.notes`，`versionCode=3`、`versionName=1.1.1`，最低 Android 6.0（API 23），目标 API 35。SHA-256：`882514644a39141863efe90e43e49ae875be46c8429b0a429036e5e83d182726`；签名证书 SHA-256：`9acac77ddfd6bc6e545744b9eeb612a3c0b1a3700d0eea7f3baf80f968ff2345`。`zipalign -c` 和 `apksigner verify` 均通过（v1、v2、v3）。签名密钥保存在本机 `~/.local/share/surge/signing/`，未纳入项目或 APK；后续覆盖安装需使用同一密钥。
+- 真机测试包：[surge-android-device-test.apk](https://github.com/yzxcxy/Surge/releases/download/v1.2.0/surge-android-device-test.apk)，由 `assembleRelease` 的未签名 APK 对齐后，以独立的本机测试密钥签名。包名 `org.surge.notes`，`versionCode=4`、`versionName=1.2.0`，最低 Android 6.0（API 23），目标 API 35。SHA-256：`7e4fe22c4b5ef2ce4998d0ab59a6ddd418527c9f9ec4e8d0617044f50e8c4512`；签名证书 SHA-256：`9acac77ddfd6bc6e545744b9eeb612a3c0b1a3700d0eea7f3baf80f968ff2345`。`zipalign -c` 和 `apksigner verify` 均通过（v1、v2、v3）。签名密钥保存在本机 `~/.local/share/surge/signing/`，未纳入项目或 APK；后续覆盖安装需使用同一密钥。
 - 上述真机包没有调试构建的自签 CA 信任配置；尚未在用户的实体设备上测试。若设备已装相同包名的调试签名版本，Android 不允许直接覆盖安装。
 - Docker Compose 服务 `surge-surge-1` 在 `8787` 端口运行，`GET /api/health` 返回 `{"ok":true}`；重启容器后随机盐值保持一致。测试结束时，正式 Docker 卷的操作日志游标仍为 0。
 - 安装 OpenJDK 21、Android SDK 平台 35、Build Tools 35、Platform Tools 和 Emulator，并执行 `npm run android:sync` 与 `./gradlew assembleDebug --no-daemon`，构建成功。
-- 调试包位于本机 `dist/surge-android-debug.apk`，包名 `org.surge.notes`，大小约 5.0 MiB；本次 SHA-256：`d0da2cd42a0cea8da3b7dc8bfe19cded0aa4e1664c68c3d11f4f546640e8191d`。
+- 调试包位于本机 `dist/surge-android-debug.apk`，包名 `org.surge.notes`，大小约 3.9 MiB；本次 SHA-256：`39b5a92f06817cda8e09dddd5d6631b70a0d4438ef720d45c382e1d5bef17969`。
 - `npm test` 通过，覆盖加密操作、离线修改收敛、操作去重、鉴权、加密附件及服务端重启持久化。
 - Obsidian 插件的 `npx tsc --noEmit` 和 `npm run build` 通过。
 
@@ -39,7 +39,7 @@
 
 ## 2026-11-15 所见即所得编辑器回归
 
-- Web 正文改为可编辑的排版区域。独立 Chrome 数据目录实测：普通段落、待办勾选、表格单元格和 LaTeX 公式均在原位显示与编辑；插入 PNG 后图片显示在正文中，正文不出现 `surge-blob:` 标记。返回列表、重开笔记和刷新页面后，勾选状态、单元格、公式和图片均还原。
+- Web 正文改为可编辑的排版区域。独立 Chrome 数据目录实测：普通段落、待办勾选和表格单元格均在原位显示与编辑；插入 PNG 后图片显示在正文中，正文不出现 `surge-blob:` 标记。返回列表、重开笔记和刷新页面后，勾选状态、单元格和图片均还原。
 - Android 调试包重新构建并安装到 API 35 模拟器。正文获得焦点时系统键盘弹出，插入工具栏保持在键盘上方。[编辑页键盘截图](android-rich-editor-keyboard.png)。
 - `npm test` 3 项通过；Obsidian 插件 `tsc --noEmit` 和构建通过。Docker Compose 重新构建并启动，`GET /api/health` 返回 `{"ok":true}`。
 
@@ -70,3 +70,9 @@
 ## 2026-11-16 版本 1.1.1
 
 重新打包并用相同的本机签名密钥签署 Android 包，`versionCode=3`。版本 1.1.1 的 GitHub 标签与应用源码对应，更新检查保留 GitHub API 限流时的公开版本清单备用来源。`npm test` 6 项、本机 Android debug/release 构建和签名校验均通过。
+
+## 2026-11-16 版本 1.2.0
+
+- 按开发阶段的产品取舍，移除公式入口、公式解析和 KaTeX 依赖及资源；APK 内未发现对应资源。旧的公式标记按普通文本显示。
+- 浏览器回归了图片后光标落点、媒体图标操作、背景色与卡片一致、导图全屏大纲输入、表格列宽、常用 Emoji 搜索和插入、T 格式工具栏、移动分类及长按批量操作。
+- 在 Android 15 模拟器安装调试包并启动，首页和笔记编辑页正常显示；`dumpsys` 显示 `versionCode=4`、`versionName=1.2.0`。`npm test` 6 项、Obsidian 类型检查与构建、Docker 健康检查及测试包签名校验通过。

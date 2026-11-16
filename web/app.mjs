@@ -1,6 +1,6 @@
 import { bytesToUrl, decryptValue, deriveKey, downloadBlob, encryptValue, exchange, fetchInfo, historyForNote, makeOp, materialize, reencryptOps, uploadBlob, urlToBytes } from './core.mjs';
 import { allBlobs, allOps, getBlob, getMeta, openDb, putBlobs, putMeta, putOps, replaceVault } from './db.mjs';
-import { attachmentNode, formulaNode, tableNode, renderInlineMarkdown, renderMarkdown, serializeMarkdown } from './rich-editor.mjs';
+import { attachmentNode, tableNode, renderInlineMarkdown, renderMarkdown, serializeMarkdown } from './rich-editor.mjs';
 import { APP_VERSION, DEFAULT_REPOSITORY, compareVersions, latestRelease, parseRepository } from './updates.mjs';
 
 const $ = id => document.getElementById(id);
@@ -11,7 +11,9 @@ let notes = new Map(), current = null, draftId = null, view = 'all', tab = 'note
 let syncing = false, syncTimer, writeQueue = Promise.resolve();
 let folderCatalog = [], folderDialogMode = 'create', renameFrom = '', folderAssignId = null;
 let attachmentUrls = [];
-let bodyRange = null, editingFormula = null;
+let bodyRange = null;
+let attachmentTarget = null, attachmentPayload = null;
+let selectMode = false, selectedNotes = new Set(), moveTargets = [];
 let nativeVisibleHeight = Infinity;
 let layout = localStorage.getItem('surge-layout') === 'grid' ? 'grid' : 'list';
 const vaultMarker = 'surge-vault-v1';
@@ -32,6 +34,9 @@ const previewBody = value => editableBody(value)
   .trim();
 const gridIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';
 const listIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16"/></svg>';
+const backgrounds = [
+  ['paper', '白纸'], ['warm', '米色'], ['rose', '浅粉'], ['sage', '浅绿'], ['sky', '浅蓝'], ['lavender', '浅紫']
+];
 
 function status(message, kind = '') {
   $('sync-label').textContent = message;
@@ -145,7 +150,10 @@ function render() {
   $('category-strip').parentElement.hidden = view === 'trash';
   $('new-note').hidden = view === 'trash';
   $('fab').hidden = view === 'trash';
-  $('tabbar').hidden = view === 'trash';
+  $('tabbar').hidden = view === 'trash' || selectMode;
+  $('batch-bar').hidden = !selectMode;
+  $('batch-count').textContent = `已选 ${selectedNotes.size} 项`;
+  if (selectMode) $('fab').hidden = true;
   $('notes').hidden = tab !== 'notes';
   $('todos').hidden = tab !== 'todos';
   $('fab').setAttribute('aria-label', tab === 'todos' ? '新建待办' : '新建笔记');
@@ -164,6 +172,11 @@ function render() {
   $('notes').replaceChildren(...list.map(note => {
     const button = document.createElement('button');
     button.className = 'note-card';
+    button.dataset.background = note.background || 'paper';
+    button.classList.toggle('selecting', selectMode);
+    button.classList.toggle('selected', selectedNotes.has(note.id));
+    if (selectMode) button.setAttribute('aria-pressed', String(selectedNotes.has(note.id)));
+    if (selectMode) { const circle = document.createElement('span'); circle.className = 'select-circle'; circle.setAttribute('aria-hidden', 'true'); button.append(circle); }
     const title = document.createElement('h3');
     title.textContent = note.title || '未命名笔记';
     const preview = document.createElement('p');
@@ -177,7 +190,20 @@ function render() {
     else tag.textContent = note.folder;
     footer.append(date, tag);
     button.append(title, preview, footer);
-    button.onclick = () => openEditor(note.id);
+    let hold, held = false, startX = 0, startY = 0;
+    button.onpointerdown = event => {
+      if (selectMode || view === 'trash') return;
+      startX = event.clientX; startY = event.clientY;
+      hold = setTimeout(() => { held = true; selectMode = true; selectedNotes.add(note.id); navigator.vibrate?.(25); render(); }, 480);
+    };
+    button.onpointermove = event => { if (Math.abs(event.clientX - startX) > 12 || Math.abs(event.clientY - startY) > 12) clearTimeout(hold); };
+    button.onpointerup = button.onpointercancel = () => clearTimeout(hold);
+    button.oncontextmenu = event => { event.preventDefault(); clearTimeout(hold); held = true; selectMode = true; selectedNotes.add(note.id); render(); };
+    button.onclick = () => {
+      if (held) { held = false; return; }
+      if (selectMode) { selectedNotes.has(note.id) ? selectedNotes.delete(note.id) : selectedNotes.add(note.id); if (!selectedNotes.size) exitSelection(); render(); }
+      else openEditor(note.id);
+    };
     return button;
   }));
   $('todos').replaceChildren(...tasks.map(task => {
@@ -279,6 +305,7 @@ async function deleteFolder(folder) {
 }
 function setView(next) {
   discardDraft();
+  exitSelection();
   view = next;
   if (next === 'trash') tab = 'notes';
   current = null;
@@ -288,17 +315,36 @@ function setView(next) {
 }
 function setTab(next) {
   discardDraft();
+  exitSelection();
   tab = next;
   current = null;
   $('editor').hidden = true;
   render();
+}
+function exitSelection() {
+  selectMode = false;
+  selectedNotes.clear();
+}
+function openMoveDialog(ids) {
+  moveTargets = ids.filter(id => notes.has(id));
+  if (!moveTargets.length) return;
+  const options = ['', ...allFolders()];
+  $('move-folder').replaceChildren(...options.map(folder => {
+    const option = document.createElement('option');
+    option.value = folder;
+    option.textContent = folder || '未分类';
+    return option;
+  }));
+  $('move-folder').value = notes.get(moveTargets[0])?.folder || '';
+  $('more-menu').hidden = true;
+  $('move-dialog').showModal();
 }
 function save(id, field, value) {
   writeQueue = writeQueue.catch(() => {}).then(async () => {
     if (!key) return;
     const op = await makeOp(key, actor, ++clock, id, field, value);
     await putOps(db, [{ ...op, localPending: true }]);
-    const note = notes.get(id) || { id, title: '', body: '', folder: '', pinned: false, deleted: false, updatedAt: 0 };
+    const note = notes.get(id) || { id, title: '', body: '', folder: '', pinned: false, deleted: false, background: 'paper', updatedAt: 0 };
     note[field] = value;
     notes.set(id, note);
     $('save-state').textContent = '已保存在本机';
@@ -341,7 +387,7 @@ function createNote() {
   const id = crypto.randomUUID();
   discardDraft();
   draftId = id;
-  notes.set(id, { id, title: '', body: '', folder: ['all', 'pinned', 'trash'].includes(view) ? '' : view, pinned: false, deleted: false, updatedAt: Date.now() });
+  notes.set(id, { id, title: '', body: '', folder: ['all', 'pinned', 'trash'].includes(view) ? '' : view, pinned: false, deleted: false, background: 'paper', updatedAt: Date.now() });
   openEditor(id);
   $('note-title').focus();
 }
@@ -360,6 +406,11 @@ function openEditor(id) {
   if (!note) return;
   closeMobileNav();
   $('editor').hidden = false;
+  $('editor').dataset.background = note.background || 'paper';
+  $('background-strip').hidden = true;
+  $('attachment-actions').hidden = true;
+  $('format-toolbar').hidden = true;
+  $('editor-toolbar').hidden = false;
   $('note-title').value = note.title;
   clearAttachmentUrls();
   renderMarkdown(note.body, $('note-body'));
@@ -534,7 +585,8 @@ function editorRange() {
   const range = bodyRange?.cloneRange();
   if (range && body.contains(range.commonAncestorContainer)) return range;
   const end = document.createRange();
-  end.selectNodeContents(body);
+  const last = body.lastElementChild;
+  end.selectNodeContents(last?.matches('p, li, h1, h2, h3, blockquote') ? last : body);
   end.collapse(false);
   return end;
 }
@@ -549,8 +601,13 @@ function saveEditorBody() {
 }
 function insertText(value) {
   if (!current) return;
-  focusRange();
-  document.execCommand('insertText', false, value);
+  const range = editorRange();
+  range.deleteContents();
+  const node = document.createTextNode(value);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  focusRange(range);
   saveEditorBody();
 }
 function insertBlock(node) {
@@ -563,7 +620,10 @@ function insertBlock(node) {
   else if (block) block.after(node);
   else body.append(node);
   const caret = document.createRange();
-  const target = node.querySelector('td, li') || node;
+  const nonEditable = node.matches('.rich-attachment');
+  const after = nonEditable ? document.createElement('p') : null;
+  if (after) node.after(after);
+  const target = after || node.querySelector('td, li') || node;
   caret.selectNodeContents(target);
   caret.collapse(target !== node);
   focusRange(caret);
@@ -578,6 +638,28 @@ function insertTask() {
   item.append(checkbox, document.createTextNode(' '));
   list.append(item);
   insertBlock(list);
+}
+function applyFormat(kind) {
+  if (!current) return;
+  if (kind === 'bold' || kind === 'italic') {
+    focusRange();
+    document.execCommand(kind === 'bold' ? 'bold' : 'italic');
+    saveEditorBody();
+    return;
+  }
+  const body = $('note-body');
+  const range = editorRange();
+  let block = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+  while (block && block.parentElement !== body) block = block.parentElement;
+  if (!block || block.matches('.rich-attachment, table')) return;
+  const next = document.createElement(kind === 'list' ? 'ul' : kind === 'quote' ? 'blockquote' : kind);
+  const target = kind === 'list' ? document.createElement('li') : next;
+  while (block.firstChild) target.append(block.firstChild);
+  if (kind === 'list') next.append(target);
+  block.replaceWith(next);
+  const caret = document.createRange();
+  caret.selectNodeContents(target); caret.collapse(false); focusRange(caret);
+  saveEditorBody();
 }
 async function payloadFor(id) {
   let blob = await getBlob(db, id);
@@ -601,10 +683,10 @@ async function renderAttachments(id) {
       if (current !== id || !card.isConnected) return;
       card.replaceChildren();
       card.dataset.loaded = 'true';
-      const label = document.createElement('span');
-      label.textContent = payload.name || '附件';
-      card.append(label);
       if (payload.kind === 'password') {
+        const label = document.createElement('span');
+        label.textContent = payload.name || '密码条目';
+        card.append(label);
         const account = document.createElement('small');
         account.textContent = payload.username || '';
         const copy = document.createElement('button');
@@ -617,22 +699,22 @@ async function renderAttachments(id) {
       const url = URL.createObjectURL(file);
       attachmentUrls.push(url);
       if (['image', 'camera', 'drawing', 'mindmap'].includes(payload.kind)) {
+        card.classList.add('image-attachment');
+        card.style.setProperty('--image-scale', String(payload.scale || 1));
         const image = document.createElement('img');
         image.src = url;
-        image.alt = payload.name || '';
-        card.prepend(image);
-        if (payload.kind === 'drawing') {
-          const edit = document.createElement('button');
-          edit.textContent = '编辑绘图';
-          edit.onclick = () => openDrawingEditor(payload, card, id);
-          card.append(edit);
-        }
+        image.alt = payload.caption || (payload.kind === 'mindmap' ? '思维导图' : payload.kind === 'drawing' ? '绘图' : '图片');
+        card.append(image);
+        if (payload.caption) { const caption = document.createElement('figcaption'); caption.textContent = payload.caption; card.append(caption); }
+        card.onclick = event => { event.stopPropagation(); showAttachmentActions(card, payload); };
       } else if (payload.kind === 'audio') {
+        const label = document.createElement('span'); label.textContent = payload.name || '录音'; card.append(label);
         const player = document.createElement('audio');
         player.controls = true;
         player.src = url;
         card.append(player);
       } else {
+        const label = document.createElement('span'); label.textContent = payload.name || '附件'; card.append(label);
         const link = document.createElement('a');
         link.href = url;
         link.download = payload.name || '附件';
@@ -643,6 +725,36 @@ async function renderAttachments(id) {
       card.textContent = '附件暂不可用';
     }
   }
+}
+function hideAttachmentActions() { $('attachment-actions').hidden = true; attachmentTarget = attachmentPayload = null; }
+function showAttachmentActions(card, payload) {
+  if (attachmentTarget === card && !$('attachment-actions').hidden) { hideAttachmentActions(); return; }
+  attachmentTarget = card;
+  attachmentPayload = payload;
+  const actions = $('attachment-actions');
+  actions.hidden = false;
+  actions.querySelector('[data-attachment-action="mindmap"]').hidden = payload.kind !== 'mindmap' || !payload.outline;
+  const rect = card.getBoundingClientRect();
+  const width = actions.offsetWidth || 290;
+  actions.style.left = Math.max(10, Math.min(rect.left, window.innerWidth - width - 10)) + 'px';
+  const below = rect.bottom + 8;
+  const above = rect.top - actions.offsetHeight - 8;
+  actions.style.top = (below + actions.offsetHeight < window.innerHeight - 8 ? below : above >= 8 ? above : Math.max(8, window.innerHeight - actions.offsetHeight - 8)) + 'px';
+}
+async function replaceAttachmentPayload(card, payload) {
+  if (!card?.isConnected || !current) return;
+  const id = crypto.randomUUID();
+  await putBlobs(db, [{ id, ciphertext: await encryptValue(key, payload), localPending: true }]);
+  const name = (payload.name || '图片').replace(/[\]\n]/g, '_');
+  card.dataset.marker = `![${name}](surge-blob:${id})`;
+  card.dataset.blobId = id;
+  delete card.dataset.loaded;
+  card.classList.remove('image-attachment');
+  card.replaceChildren();
+  hideAttachmentActions();
+  await saveEditorBody();
+  await renderAttachments(current);
+  scheduleSync();
 }
 async function storePayload(payload, noteId = current) {
   if (!noteId) return;
@@ -667,18 +779,72 @@ async function storeFile(file, kind) {
     await storePayload({ kind, name: file.name || kind, mime: file.type || 'application/octet-stream', data: bytesToUrl(new Uint8Array(await file.arrayBuffer())) }, noteId);
   } catch (error) { toast(error.message || '附件保存失败'); }
 }
-function outlineToSvg(text) {
+function outlineToSvg(items) {
   const escape = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  const lines = text.split('\n').filter(line => line.trim()).slice(0, 40);
-  const nodes = lines.map((line, index) => ({ level: Math.min(4, Math.floor((line.match(/^\s*/)[0].replace(/\t/g, '  ').length) / 2)), label: line.trim().slice(0, 24), y: 35 + index * 66 }));
-  const width = 760, height = Math.max(180, nodes.length * 66 + 35);
+  const nodes = items.filter(item => item.text.trim()).slice(0, 80).map((item, index) => ({ level: Math.min(4, item.depth), label: item.text.trim().length > 12 ? item.text.trim().slice(0, 11) + '…' : item.text.trim(), y: 35 + index * 66 }));
+  const width = 900, height = Math.max(180, nodes.length * 66 + 35);
   const edges = nodes.map((node, index) => {
     if (!index || !node.level) return '';
     const parent = nodes.slice(0, index).reverse().find(item => item.level < node.level);
-    return parent ? `<path d="M${80 + parent.level * 135} ${parent.y + 15} L${35 + node.level * 135} ${node.y + 15}" stroke="#a8b2bf" stroke-width="2" fill="none"/>` : '';
+    return parent ? `<path d="M${172 + parent.level * 170} ${parent.y + 17} H${25 + node.level * 170 - 12} V${node.y + 17} H${25 + node.level * 170}" stroke="#c8c8c8" stroke-width="2" fill="none"/>` : '';
   }).join('');
-  const boxes = nodes.map(node => `<rect x="${25 + node.level * 135}" y="${node.y}" width="115" height="31" rx="12" fill="#eff3f8" stroke="#cfd8e2"/><text x="${36 + node.level * 135}" y="${node.y + 21}" font-family="sans-serif" font-size="13" fill="#25313f">${escape(node.label)}</text>`).join('');
+  const boxes = nodes.map(node => `<rect x="${25 + node.level * 170}" y="${node.y}" width="148" height="35" rx="11" fill="${node.level ? '#f8f8f8' : '#fff8df'}" stroke="${node.level ? '#e6e6e6' : '#f3d278'}"/><text x="${36 + node.level * 170}" y="${node.y + 23}" font-family="sans-serif" font-size="14" fill="#252525">${escape(node.label)}</text>`).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="white"/>${edges}${boxes}</svg>`;
+}
+let mindmapItems = [], mindmapTarget = null, mindmapActive = 0;
+function focusMindmap(index) {
+  const input = $('mindmap-items').children[index]?.querySelector('input');
+  input?.focus();
+  input?.setSelectionRange(input.value.length, input.value.length);
+}
+function renderMindmapItems(focusIndex = -1) {
+  $('mindmap-items').replaceChildren(...mindmapItems.map((item, index) => {
+    const row = document.createElement('div');
+    row.className = 'mindmap-row';
+    row.style.setProperty('--depth', item.depth);
+    const dot = document.createElement('span'); dot.className = 'mindmap-dot'; dot.setAttribute('aria-hidden', 'true');
+    const input = document.createElement('input');
+    input.value = item.text;
+    input.placeholder = index ? '新主题' : '中心主题';
+    input.setAttribute('aria-label', `第 ${index + 1} 个主题`);
+    input.onfocus = () => { mindmapActive = index; };
+    input.oninput = () => { item.text = input.value; if (!$('mindmap-preview').hidden) updateMindmapPreview(); };
+    input.onkeydown = event => {
+      if (event.key === 'Enter') { event.preventDefault(); addMindmapItem(index); }
+      else if (event.key === 'Tab') { event.preventDefault(); shiftMindmapItem(index, event.shiftKey ? -1 : 1); }
+      else if (event.key === 'Backspace' && !input.value && mindmapItems.length > 1) {
+        event.preventDefault(); mindmapItems.splice(index, 1); renderMindmapItems(Math.max(0, index - 1));
+      } else if (event.key === 'ArrowUp' && index > 0 && input.selectionStart === 0) { event.preventDefault(); focusMindmap(index - 1); }
+      else if (event.key === 'ArrowDown' && index < mindmapItems.length - 1 && input.selectionStart === input.value.length) { event.preventDefault(); focusMindmap(index + 1); }
+    };
+    row.append(dot, input);
+    return row;
+  }));
+  if (focusIndex >= 0) focusMindmap(focusIndex);
+}
+function addMindmapItem(after = mindmapActive) {
+  const index = Math.min(after + 1, mindmapItems.length);
+  mindmapItems.splice(index, 0, { depth: mindmapItems[after]?.depth || 0, text: '' });
+  renderMindmapItems(index);
+}
+function shiftMindmapItem(index, direction) {
+  const item = mindmapItems[index];
+  if (!item) return;
+  item.depth = Math.max(0, Math.min(4, item.depth + direction, index ? mindmapItems[index - 1].depth + 1 : 0));
+  renderMindmapItems(index);
+}
+function updateMindmapPreview() { $('mindmap-preview').innerHTML = outlineToSvg(mindmapItems); }
+function openMindmapEditor(payload = null, card = null, noteId = current) {
+  if (!noteId) return;
+  mindmapTarget = card ? { card, noteId, payload } : null;
+  mindmapItems = payload?.outline?.length ? payload.outline.map(item => ({ depth: Number(item.depth) || 0, text: String(item.text || '') })) : [{ depth: 0, text: '' }];
+  mindmapActive = 0;
+  $('mindmap-items').hidden = false;
+  $('mindmap-add').hidden = false;
+  $('mindmap-preview').hidden = true;
+  renderMindmapItems();
+  $('mindmap-dialog').showModal();
+  focusMindmap(0);
 }
 async function showHistory() {
   if (!current) return;
@@ -754,15 +920,104 @@ $('open-update').onclick = async () => {
   } catch { $('update-status').textContent = '无法打开下载页'; }
 };
 window.surgeHandleBack = () => {
+  const modal = document.querySelector('dialog[open]');
+  if (modal) {
+    if (modal.id === 'record-dialog' && recorder?.state === 'recording') $('record-cancel').click();
+    else modal.close();
+    return true;
+  }
   if (!$('settings-panel').hidden) { closeSettings(); return true; }
   if (!$('history').hidden) { $('history').hidden = true; return true; }
   if (!$('editor').hidden) { $('back').click(); return true; }
+  if (selectMode) { exitSelection(); render(); return true; }
   if (!$('mobile-nav').hidden) { closeMobileNav(); return true; }
   return false;
 };
 $('new-note').onclick = createForTab;
 $('fab').onclick = createForTab;
 $('back').onclick = () => { discardDraft(); $('editor').hidden = true; current = null; render(); };
+$('batch-cancel').onclick = () => { exitSelection(); render(); };
+$('batch-pin').onclick = async () => {
+  const ids = [...selectedNotes];
+  const pin = !ids.every(id => notes.get(id)?.pinned);
+  for (const id of ids) await changeNote(id, 'pinned', pin);
+  exitSelection(); render();
+};
+$('batch-move').onclick = () => openMoveDialog([...selectedNotes]);
+$('batch-delete').onclick = async () => {
+  for (const id of [...selectedNotes]) await changeNote(id, 'deleted', true);
+  exitSelection(); render();
+};
+$('move-note').onclick = () => openMoveDialog([current]);
+$('move-cancel').onclick = () => $('move-dialog').close();
+$('move-save').onclick = async () => {
+  const folder = $('move-folder').value;
+  $('move-dialog').close();
+  for (const id of moveTargets) if (notes.get(id)?.folder !== folder) await changeNote(id, 'folder', folder);
+  moveTargets = [];
+  exitSelection(); render();
+};
+$('show-format').onclick = () => { $('editor-toolbar').hidden = true; $('format-toolbar').hidden = false; };
+$('hide-format').onclick = () => { $('format-toolbar').hidden = true; $('editor-toolbar').hidden = false; };
+document.querySelectorAll('[data-format]').forEach(button => button.onclick = () => applyFormat(button.dataset.format));
+for (const [id, label] of backgrounds) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.background = id;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.onclick = async () => {
+    if (!current) return;
+    $('editor').dataset.background = id;
+    $('background-strip').hidden = true;
+    await changeNote(current, 'background', id);
+  };
+  $('background-strip').append(button);
+}
+$('background-button').onclick = () => {
+  $('background-strip').hidden = !$('background-strip').hidden;
+  for (const button of $('background-strip').children) button.classList.toggle('active', button.dataset.background === $('editor').dataset.background);
+  $('more-menu').hidden = true;
+};
+$('note-body').addEventListener('scroll', hideAttachmentActions);
+$('note-body').addEventListener('click', event => { if (!event.target.closest('.rich-attachment')) hideAttachmentActions(); });
+document.querySelectorAll('[data-attachment-action]').forEach(button => button.onclick = async () => {
+  const card = attachmentTarget, payload = attachmentPayload;
+  if (!card || !payload || !card.isConnected) return;
+  const action = button.dataset.attachmentAction;
+  hideAttachmentActions();
+  if (action === 'caption') {
+    const input = document.createElement('input');
+    input.className = 'attachment-caption-input';
+    input.value = payload.caption || '';
+    input.placeholder = '添加注释';
+    input.setAttribute('aria-label', '图片注释');
+    card.append(input);
+    input.focus();
+    input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); input.blur(); } };
+    input.onblur = () => { const caption = input.value.trim(); input.remove(); if (caption !== (payload.caption || '')) replaceAttachmentPayload(card, { ...payload, caption }); };
+  } else if (action === 'draw') openDrawingEditor(payload, card, current);
+  else if (action === 'mindmap') openMindmapEditor(payload, card, current);
+  else if (action === 'resize') {
+    const sizes = [1, .75, .5];
+    const next = sizes[(sizes.indexOf(payload.scale || 1) + 1) % sizes.length];
+    await replaceAttachmentPayload(card, { ...payload, scale: next });
+    toast(`大小 ${Math.round(next * 100)}%`);
+  } else if (action === 'copy') {
+    const clone = attachmentNode(card.dataset.marker);
+    const after = document.createElement('p');
+    card.after(clone, after);
+    const range = document.createRange(); range.selectNodeContents(after); range.collapse(true); focusRange(range);
+    await saveEditorBody();
+    await renderAttachments(current);
+  } else if (action === 'delete') {
+    const after = card.nextElementSibling?.matches('p') ? card.nextElementSibling : document.createElement('p');
+    if (!after.isConnected) card.after(after);
+    card.remove();
+    const range = document.createRange(); range.selectNodeContents(after); range.collapse(true); focusRange(range);
+    await saveEditorBody();
+  }
+});
 $('trash-back').onclick = () => setView('all');
 $('mobile-folders').onclick = () => { const open = $('mobile-nav').hidden; $('mobile-nav').hidden = !open; $('mobile-folders').setAttribute('aria-expanded', String(open)); };
 $('mobile-settings').onclick = showSettings;
@@ -865,10 +1120,6 @@ document.addEventListener('selectionchange', () => {
 $('note-body').addEventListener('change', event => { if (event.target.matches('input[type="checkbox"]')) saveEditorBody(); });
 $('note-title').oninput = event => { if (current && !composingTitle) changeNote(current, 'title', event.target.value); };
 $('note-body').oninput = () => { if (current && !composingBody) { applyMarkdownShortcut(); saveEditorBody(); } };
-$('note-body').ondblclick = event => {
-  editingFormula = event.target.closest('.rich-formula');
-  if (editingFormula) { $('formula-source').value = editingFormula.dataset.formula || ''; $('formula-dialog').showModal(); }
-};
 $('note-folder').onchange = event => {
   if (!current) return;
   if (event.target.value === '__new__') { const id = current; render(); openFolderDialog('create', '', id); }
@@ -895,40 +1146,54 @@ document.querySelectorAll('[data-insert]').forEach(button => button.onclick = ()
   if (action === 'text') focusRange();
   else if (action === 'task') insertTask();
   else if (action === 'table') insertBlock(tableNode());
-  else if (action === 'formula') { editingFormula = null; $('formula-source').value = ''; $('formula-dialog').showModal(); }
   else if (['image', 'camera', 'file'].includes(action)) $('pick-' + action).click();
   else if (action === 'audio') $('record-dialog').showModal();
   else if (action === 'drawing') openDrawingEditor();
-  else if (action === 'mindmap') $('mindmap-dialog').showModal();
-  else if (action === 'emoji') $('emoji-dialog').showModal();
-  else if (action === 'password') $('password-dialog').showModal();
+  else if (action === 'mindmap') openMindmapEditor();
+  else if (action === 'emoji') { $('emoji-search').value = ''; renderEmojis(); $('emoji-dialog').showModal(); $('emoji-search').focus(); }
 });
-const emojis = ['😀', '😊', '😂', '🥰', '👍', '👏', '🎉', '💡', '✅', '⭐', '❤️', '🔥', '📌', '📚', '🌿', '☕', '🚀', '📝', '💬', '🙏'];
-$('emoji-grid').replaceChildren(...emojis.map(emoji => {
-  const button = document.createElement('button');
-  button.textContent = emoji;
-  button.onclick = () => { insertText(emoji); $('emoji-dialog').close(); };
-  return button;
-}));
+const emojis = [
+  ['😀','开心 笑脸'],['😄','大笑 开心'],['😊','微笑 温暖'],['🥹','感动'],['😂','笑哭'],['🤣','爆笑'],['😅','尴尬'],['🥰','喜欢 爱'],['😍','心动'],['😘','亲亲'],['😎','酷'],['🤔','思考'],['😮','惊讶'],['🥲','苦笑'],['😢','难过'],['😭','大哭'],['😤','生气'],['😴','睡觉'],['🤒','生病'],['🥳','庆祝'],['🤗','拥抱'],['🫠','融化'],['🙃','无奈'],['😇','天使'],
+  ['👍','赞 好'],['👎','不赞'],['👏','鼓掌'],['🙌','万岁'],['👌','可以'],['✌️','胜利'],['🤞','好运'],['🙏','谢谢 拜托'],['💪','加油 力量'],['👀','看'],['🫶','爱心'],['👋','你好 再见'],
+  ['❤️','爱心 红心'],['🧡','橙心'],['💛','黄心'],['💚','绿心'],['💙','蓝心'],['💜','紫心'],['💔','心碎'],['✨','闪亮'],['⭐','星星'],['🌟','发光'],['🔥','火 热门'],['🎉','庆祝'],['🎂','生日 蛋糕'],['🎁','礼物'],['🌸','花'],['🌿','植物'],['🌈','彩虹'],['☀️','太阳'],['🌙','月亮'],['☁️','云'],['☔','雨'],['❄️','雪'],
+  ['✅','完成 对'],['❌','错误 不'],['⚠️','提醒 警告'],['❗','注意'],['❓','问题'],['💡','想法 灵感'],['📌','置顶 标记'],['📅','日期 日历'],['📝','笔记 记录'],['📚','学习 书'],['📷','拍照 图片'],['🎵','音乐'],['🎧','耳机'],['📍','地点'],['💬','聊天'],['🔒','锁 隐私'],['🔔','提醒'],['⏰','时间 闹钟'],['🚀','进步 出发'],['☕','咖啡'],['🍵','茶'],['🍎','苹果'],['🍜','面条'],['🏠','家'],['🚗','车']
+];
+function renderEmojis() {
+  const query = $('emoji-search').value.trim().toLowerCase();
+  $('emoji-grid').replaceChildren(...emojis.filter(([emoji, words]) => !query || emoji.includes(query) || words.toLowerCase().includes(query)).map(([emoji, words]) => {
+    const button = document.createElement('button');
+    button.textContent = emoji;
+    button.title = words.split(' ')[0];
+    button.setAttribute('aria-label', words.split(' ')[0]);
+    button.onclick = () => { $('emoji-dialog').close(); insertText(emoji); };
+    return button;
+  }));
+}
+$('emoji-search').oninput = renderEmojis;
+renderEmojis();
 $('emoji-close').onclick = () => $('emoji-dialog').close();
 $('mindmap-cancel').onclick = () => $('mindmap-dialog').close();
-$('formula-cancel').onclick = () => $('formula-dialog').close();
-$('formula-save').onclick = () => {
-  const source = $('formula-source').value.trim();
-  if (!source) return;
-  const node = formulaNode(source);
-  $('formula-dialog').close();
-  if (editingFormula?.isConnected) { editingFormula.replaceWith(node); saveEditorBody(); }
-  else insertBlock(node);
-  editingFormula = null;
+$('mindmap-add').onclick = () => addMindmapItem();
+$('mindmap-indent').onclick = () => shiftMindmapItem(mindmapActive, 1);
+$('mindmap-outdent').onclick = () => shiftMindmapItem(mindmapActive, -1);
+$('mindmap-preview-toggle').onclick = () => {
+  const show = $('mindmap-preview').hidden;
+  $('mindmap-preview').hidden = !show;
+  $('mindmap-items').hidden = show;
+  $('mindmap-add').hidden = show;
+  if (show) { document.activeElement?.blur(); updateMindmapPreview(); }
+  else focusMindmap(mindmapActive);
 };
 $('mindmap-save').onclick = async () => {
-  const outline = $('mindmap-outline').value.trim();
-  if (!outline) { toast('输入导图内容'); return; }
-  const file = new File([outlineToSvg(outline)], '思维导图.svg', { type: 'image/svg+xml' });
+  const outline = mindmapItems.filter(item => item.text.trim()).map(item => ({ depth: item.depth, text: item.text.trim() }));
+  if (!outline.length) { toast('输入主题'); return; }
+  outline[0].depth = 0;
+  const data = bytesToUrl(new TextEncoder().encode(outlineToSvg(outline)));
+  const payload = { kind: 'mindmap', name: '思维导图.svg', mime: 'image/svg+xml', data, outline, caption: mindmapTarget?.payload?.caption || '', scale: mindmapTarget?.payload?.scale || 1 };
   $('mindmap-dialog').close();
-  await storeFile(file, 'mindmap');
-  $('mindmap-outline').value = '';
+  if (mindmapTarget?.card?.isConnected) await replaceAttachmentPayload(mindmapTarget.card, payload);
+  else await storePayload(payload, mindmapTarget?.noteId || current);
+  mindmapTarget = null;
 };
 const canvas = $('drawing-canvas');
 const context = canvas.getContext('2d');
@@ -983,7 +1248,7 @@ async function restoreDrawing(index) {
 async function openDrawingEditor(payload = null, card = null, noteId = current) {
   if (!noteId) return;
   document.activeElement?.blur();
-  drawingTarget = card ? { card, noteId } : null;
+  drawingTarget = card ? { card, noteId, payload } : null;
   setDrawingTool('pencil');
   setDrawingColor($('drawing-color').value);
   await new Promise(resolve => setTimeout(resolve, 160));
@@ -1069,28 +1334,11 @@ $('drawing-save').onclick = async () => {
     const data = bytesToUrl(new Uint8Array(await blob.arrayBuffer()));
     if (drawingTarget && !drawingTarget.card.isConnected) throw new Error('请重新打开笔记');
     if (drawingTarget) {
-      const id = crypto.randomUUID();
-      await putBlobs(db, [{ id, ciphertext: await encryptValue(key, { kind: 'drawing', name: '绘图.png', mime: 'image/png', data }), localPending: true }]);
-      const card = drawingTarget.card;
-      card.dataset.marker = `![绘图.png](surge-blob:${id})`;
-      card.dataset.blobId = id;
-      delete card.dataset.loaded;
-      card.textContent = '绘图.png';
-      await saveEditorBody();
-      await renderAttachments(noteId);
-      scheduleSync();
+      await replaceAttachmentPayload(drawingTarget.card, { kind: 'drawing', name: '绘图.png', mime: 'image/png', data, caption: drawingTarget.payload?.caption || '', scale: drawingTarget.payload?.scale || 1 });
     } else await storePayload({ kind: 'drawing', name: '绘图.png', mime: 'image/png', data }, noteId);
     $('drawing-dialog').close();
   } catch (error) { toast(error.message || '绘图保存失败'); }
   finally { $('drawing-save').disabled = false; }
-};
-$('password-cancel').onclick = () => $('password-dialog').close();
-$('password-save').onclick = async () => {
-  const name = $('password-name').value.trim(), username = $('password-username').value.trim(), secret = $('password-secret').value;
-  if (!name || !secret) { toast('填写名称和密码'); return; }
-  $('password-dialog').close();
-  await storePayload({ kind: 'password', name: '密码：' + name, username, secret });
-  $('password-name').value = $('password-username').value = $('password-secret').value = '';
 };
 let recorder = null, recordStream = null, recordChunks = [], recordCanceled = false;
 $('record-start').onclick = async () => {

@@ -1,8 +1,6 @@
-import katex from './vendor/katex/katex.mjs';
-
 const markerPattern = /^!?\[([^\]]*)\]\(surge-blob:([a-f0-9-]{36})\)$/;
-const inlinePattern = /(!?\[[^\]]*\]\(surge-blob:[a-f0-9-]{36}\)|\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|\$[^$\n]+\$|\[[^\]]+\]\(https?:\/\/[^)]+\))/g;
-const blockStart = line => /^\s*(?:#{1,6}\s|[-*]\s|\d+\.\s|>\s|\$\$\s*$|```|~~~)/.test(line) || /^\|/.test(line) || markerPattern.test(line.trim());
+const inlinePattern = /(!?\[[^\]]*\]\(surge-blob:[a-f0-9-]{36}\)|\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/g;
+const blockStart = line => /^\s*(?:#{1,6}\s|[-*]\s|\d+\.\s|>\s|```|~~~)/.test(line) || /^\|/.test(line) || markerPattern.test(line.trim());
 
 function appendTextWithBreaks(parent, text) {
   text.split('\n').forEach((part, index) => {
@@ -19,20 +17,10 @@ export function attachmentNode(marker) {
   figure.dataset.marker = marker.trim();
   figure.dataset.blobId = match?.[2] || '';
   const label = document.createElement('span');
-  label.textContent = match?.[1] || '附件';
+  label.textContent = marker.startsWith('!') ? '' : (match?.[1] || '附件');
+  if (marker.startsWith('!')) label.hidden = true;
   figure.append(label);
   return figure;
-}
-
-export function formulaNode(source) {
-  const node = document.createElement('div');
-  node.className = 'rich-formula';
-  node.contentEditable = 'false';
-  node.dataset.formula = source;
-  try { katex.render(source, node, { displayMode: true, throwOnError: false, trust: false, strict: 'ignore' }); }
-  catch { node.textContent = source; }
-  node.title = '双击编辑公式';
-  return node;
 }
 
 function appendInline(parent, source) {
@@ -54,14 +42,6 @@ function appendInline(parent, source) {
       const code = document.createElement('code');
       code.textContent = token.slice(1, -1);
       parent.append(code);
-    } else if (token.startsWith('$')) {
-      const math = document.createElement('span');
-      math.className = 'rich-inline-formula';
-      math.contentEditable = 'false';
-      math.dataset.formula = token.slice(1, -1);
-      try { katex.render(math.dataset.formula, math, { throwOnError: false, trust: false }); }
-      catch { math.textContent = math.dataset.formula; }
-      parent.append(math);
     } else {
       const link = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/.exec(token);
       if (link) {
@@ -133,14 +113,6 @@ export function renderMarkdown(source, root) {
       root.append(pre);
       continue;
     }
-    if (/^\$\$\s*$/.test(line.trim())) {
-      const math = [];
-      i++;
-      while (i < lines.length && !/^\$\$\s*$/.test(lines[i].trim())) math.push(lines[i++]);
-      if (i < lines.length) i++;
-      root.append(formulaNode(math.join('\n')));
-      continue;
-    }
     if (/^\|/.test(line) && i + 1 < lines.length && /^\|?\s*:?-{3,}/.test(lines[i + 1])) {
       const rows = [tableCells(line)];
       i += 2;
@@ -193,7 +165,7 @@ export function renderMarkdown(source, root) {
     appendInline(paragraph, text.join('\n'));
     root.append(paragraph);
   }
-  if (!root.childNodes.length) root.append(document.createElement('p'));
+  if (!root.childNodes.length || root.lastElementChild?.matches('.rich-attachment')) root.append(document.createElement('p'));
 }
 
 function inlineMarkdown(node) {
@@ -202,7 +174,6 @@ function inlineMarkdown(node) {
   const tag = node.tagName.toLowerCase();
   if (tag === 'br') return '\n';
   if (node.dataset?.marker) return node.dataset.marker;
-  if (node.dataset?.formula) return '$' + node.dataset.formula + '$';
   if (tag === 'input' && node.type === 'checkbox') return '';
   const value = [...node.childNodes].map(inlineMarkdown).join('');
   if (tag === 'b' || tag === 'strong') return '**' + value + '**';
@@ -217,7 +188,6 @@ function serializeBlock(node) {
   if (node.nodeType !== Node.ELEMENT_NODE) return '';
   const tag = node.tagName.toLowerCase();
   if (node.dataset?.marker) return node.dataset.marker;
-  if (node.classList?.contains('rich-formula')) return `$$\n${node.dataset.formula || ''}\n$$`;
   if (tag === 'pre') return `${node.dataset.fence || '```'}${node.dataset.info || ''}\n${node.textContent || ''}\n${node.dataset.fence || '```'}`;
   if (tag === 'ul' || tag === 'ol') return [...node.children].map((li, index) => {
     const checkbox = li.querySelector(':scope > input[type="checkbox"]');

@@ -23,6 +23,8 @@ let todoReminderRule = 'none', todoReminderLunar = false, reminderSelectedDate =
 let notificationSyncTimer = null, notificationSync = Promise.resolve();
 let exactAlarmSettingRequested = false;
 let nativeVisibleHeight = Infinity;
+let editorClosing = false;
+let editorTransition = [];
 let layout = localStorage.getItem('surge-layout') === 'grid' ? 'grid' : 'list';
 const vaultMarker = 'surge-vault-v1';
 const folderRecordBody = 'surge-internal-category-record-v1';
@@ -792,15 +794,69 @@ function openEditor(id, sourceCard = null) {
   renderAttachments(id);
   updateEditorViewport();
   if (sourceCard && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    const from = sourceCard.getBoundingClientRect();
-    const to = $('editor').getBoundingClientRect();
-    if (from.width && from.height && to.width && to.height) {
-      $('editor').animate([
-        { transformOrigin: 'top left', transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`, borderRadius: '20px', opacity: .7 },
-        { transformOrigin: 'top left', transform: 'translate(0, 0) scale(1, 1)', borderRadius: '0', opacity: 1 }
-      ], { duration: 280, easing: 'cubic-bezier(.2, .75, .25, 1)' });
+    const card = sourceCard.getBoundingClientRect();
+    const box = $('editor').getBoundingClientRect();
+    if (card.width && card.height && box.width && box.height) {
+      const animation = transitionEditor(card, box, false);
+      animation.finished.then(() => cancelEditorTransition(), () => {});
     }
   }
+}
+function cancelEditorTransition() {
+  for (const animation of editorTransition) animation.cancel();
+  editorTransition = [];
+}
+function transitionEditor(card, box, closing) {
+  cancelEditorTransition();
+  const editor = $('editor');
+  const top = Math.max(0, card.top - box.top);
+  const left = Math.max(0, card.left - box.left);
+  const right = Math.max(0, box.right - card.right);
+  const bottom = Math.max(0, box.bottom - card.bottom);
+  const collapsed = `inset(${top}px ${right}px ${bottom}px ${left}px round 20px)`;
+  const expanded = 'inset(0px 0px 0px 0px round 0px)';
+  const duration = closing ? 450 : 520;
+  const easing = closing ? 'cubic-bezier(.4, 0, .2, 1)' : 'cubic-bezier(.25, .1, .25, 1)';
+  const shell = editor.animate(closing
+    ? [{ clipPath: expanded }, { clipPath: collapsed }]
+    : [{ clipPath: collapsed }, { clipPath: expanded }],
+  { duration, easing, fill: 'forwards' });
+  editorTransition.push(shell);
+  // Move the editor content towards the card while its surrounding surface clips
+  // to the card bounds. There is no extra overlay that can flash over the note.
+  const x = card.left - box.left;
+  const y = card.top - box.top;
+  for (const child of editor.children) {
+    const animation = child.animate(closing
+      ? [{ transform: 'translate(0, 0) scale(1)', opacity: 1 }, { transform: `translate(${x}px, ${y}px) scale(.88)`, opacity: 0, offset: .9 }, { transform: `translate(${x}px, ${y}px) scale(.88)`, opacity: 0 }]
+      : [{ transform: `translate(${x}px, ${y}px) scale(.88)`, opacity: 0 }, { transform: `translate(${x}px, ${y}px) scale(.88)`, opacity: 0, offset: .1 }, { transform: 'translate(0, 0) scale(1)', opacity: 1 }],
+    { duration, easing, fill: 'forwards', composite: 'replace' });
+    editorTransition.push(animation);
+  }
+  return shell;
+}
+function closeEditor() {
+  if (editorClosing) return;
+  const id = current;
+  discardDraft();
+  current = null;
+  render();
+  const card = [...$('notes').querySelectorAll('.note-card')].find(item => item.dataset.noteId === id);
+  const editor = $('editor');
+  const box = editor.getBoundingClientRect();
+  const target = card?.getBoundingClientRect();
+  if (!target || !target.width || !target.height || !box.width || !box.height || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    cancelEditorTransition();
+    editor.hidden = true;
+    return;
+  }
+  editorClosing = true;
+  const animation = transitionEditor(target, box, true);
+  animation.finished.then(() => {
+    editor.hidden = true;
+    cancelEditorTransition();
+    editorClosing = false;
+  }, () => { editorClosing = false; });
 }
 function updateEditorViewport() {
   const viewport = window.visualViewport;
@@ -1579,8 +1635,33 @@ $('enable-sync').onclick = connectSync;
 $('disable-sync').onclick = disableSync;
 $('passphrase').onkeydown = event => { if (event.key === 'Enter') $('connect').click(); };
 initializePreferences();
-$('language-select').onchange = event => { setLanguage(event.target.value); render(); };
-$('theme-select').onchange = event => setTheme(event.target.value);
+function openPreference(kind) {
+  const dialog = $('preference-dialog');
+  const options = kind === 'language' ? [['zh-CN', '简体中文'], ['en', 'English']] : [['system', '跟随系统'], ['light', '浅色'], ['dark', '深色']];
+  const selected = kind === 'language' ? locale() : (localStorage.getItem('surge-theme') || 'system');
+  $('preference-dialog-title').textContent = t(kind === 'language' ? '语言' : '主题');
+  $('preference-options').replaceChildren(...options.map(([value, label]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'preference-option';
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', String(value === selected));
+    const text = document.createElement('span'); text.textContent = t(label);
+    const check = document.createElement('span'); check.className = 'preference-check'; check.setAttribute('aria-hidden', 'true'); check.textContent = value === selected ? '✓' : '';
+    button.append(text, check);
+    button.onclick = () => {
+      dialog.close();
+      if (kind === 'language') { setLanguage(value); render(); }
+      else setTheme(value);
+    };
+    return button;
+  }));
+  dialog.showModal();
+}
+$('language-select').onclick = () => openPreference('language');
+$('theme-select').onclick = () => openPreference('theme');
+$('preference-close').onclick = () => $('preference-dialog').close();
+$('preference-dialog').onclick = event => { if (event.target === $('preference-dialog')) $('preference-dialog').close(); };
 $('glass-toggle').onchange = event => setGlass(event.target.checked);
 $('settings-back').onclick = closeSettings;
 $('open-trash').onclick = () => { closeSettings(); setView('trash'); };
@@ -1625,6 +1706,7 @@ window.surgeHandleBack = () => {
   if (!$('history').hidden) { $('history').hidden = true; return true; }
   if (!$('editor').hidden) { $('back').click(); return true; }
   if (selectMode) { exitSelection(); render(); return true; }
+  if (view === 'trash') { setView('all'); return true; }
   if (!$('category-panel').hidden) {
     if (categorySelectMode) { categorySelectMode = false; selectedCategories.clear(); renderCategoryPanel(allFolders()); }
     else closeCategoryPanel();
@@ -1691,7 +1773,7 @@ $('todo-done').onclick = async () => {
 };
 $('todo-delete').onclick = async () => { if (editingTodoId) await changeNote(editingTodoId, 'deleted', true); $('todo-dialog').close(); };
 $('todo-restore').onclick = async () => { if (editingTodoId) await changeNote(editingTodoId, 'deleted', false); $('todo-dialog').close(); };
-$('back').onclick = () => { discardDraft(); $('editor').hidden = true; current = null; render(); };
+$('back').onclick = closeEditor;
 $('batch-cancel').onclick = () => { exitSelection(); render(); };
 $('batch-pin').onclick = async () => {
   const ids = [...selectedNotes];

@@ -46,7 +46,9 @@ export function setLanguage(value) {
   localStorage.setItem('surge-language', language);
   document.documentElement.lang = language;
   document.title = language === 'en' ? 'Surge Notes' : 'Surge 笔记';
-  document.getElementById('language-select').value = language;
+  document.getElementById('language-value').textContent = language === 'en' ? 'English' : '简体中文';
+  const theme = localStorage.getItem('surge-theme') || 'system';
+  document.getElementById('theme-value').textContent = t(({ system: '跟随系统', light: '浅色', dark: '深色' })[theme] || '跟随系统');
   translateNode(document.body);
 }
 export function initializePreferences() {
@@ -71,6 +73,6 @@ function applyTheme() {
 export function setTheme(value) {
   const theme = ['system', 'light', 'dark'].includes(value) ? value : 'system';
   localStorage.setItem('surge-theme', theme);
-  document.getElementById('theme-select').value = theme;
+  document.getElementById('theme-value').textContent = t(({ system: '跟随系统', light: '浅色', dark: '深色' })[theme]);
   applyTheme();
 }

@@ -1,1 +1,1 @@
-{"id":"surge-sync","name":"Surge Sync","version":"0.1.0","minAppVersion":"1.5.0","description":"双向同步 Surge 私密便签到 Obsidian Markdown 文件","author":"Surge Contributors","isDesktopOnly":false}
+{"id":"surge-sync","name":"Surge Sync","version":"0.4.0","minAppVersion":"1.5.0","description":"单向同步 Surge 普通笔记与附件到可配置的 Obsidian 文件夹","author":"Surge Contributors","isDesktopOnly":false}

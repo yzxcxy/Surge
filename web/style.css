@@ -87,6 +87,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .note-grid.list { grid-template-columns: 1fr; }
 .note-card { min-height: 158px; display: flex; flex-direction: column; padding: 23px 24px; border: 0; border-radius: 20px; background: #fff; color: #1b1b1b; text-align: left; }
 .note-grid.list .note-card { min-height: 112px; }
+.note-card { -webkit-tap-highlight-color: transparent; }
+.note-card:focus:not(:focus-visible) { outline: none; }
 .note-card:hover { background: #fdfdfd; }
 .note-card h3 { margin: 0 0 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 18px; font-weight: 600; }
 .note-card p { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 0; color: #747474; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
@@ -422,7 +424,7 @@ body.glass .note-card[data-background="sky"] { background: #e8f2fbce; }
 body.glass .note-card[data-background="lavender"] { background: #f0ebf9ce; }
 .background-strip button[data-background="paper"] { background: #fff; }
 .background-strip button::after { content: ''; display: block; width: 38px; height: 2px; margin: 22px auto 0; background: #aaa7; box-shadow: 0 11px #aaa5, 0 22px #aaa3; }
-.editor:not([hidden]), .settings-panel:not([hidden]), .entry-dialog[open], .attachment-actions:not([hidden]), .background-strip:not([hidden]) { animation: surge-appear .18s ease-out; }
+.settings-panel:not([hidden]), .entry-dialog[open], .attachment-actions:not([hidden]), .background-strip:not([hidden]) { animation: surge-appear .18s ease-out; }
 @keyframes surge-appear { from { opacity: .65; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 
@@ -452,7 +454,7 @@ body.glass .note-card[data-background="lavender"] { background: #f0ebf9ce; }
   .note-card { min-height: 146px; padding: 19px 20px 16px; border-radius: 21px; }
   .note-grid.list .note-card { min-height: 116px; }
   .note-card h3 { font-size: 18px; }
-  .note-card p { -webkit-line-clamp: 1; font-size: 15px; }
+  .note-card p { -webkit-line-clamp: 4; font-size: 15px; }
   .note-card footer { padding-top: 12px; font-size: 12px; }
   .note-grid:not(.list) .note-card h3 { font-size: 15px; }
   .note-grid:not(.list) .note-card p { font-size: 13px; }
@@ -501,3 +503,27 @@ body.glass .note-card[data-background="lavender"] { background: #f0ebf9ce; }
   html.native-app .settings-panel header { height: 108px; padding-top: 42px; }
   .settings-content { padding: 17px 19px 40px; }
 }
+
+/* Appearance preferences */
+.setting-row select { max-width: 55%; padding: 7px 28px 7px 10px; border: 1px solid #dedede; border-radius: 9px; background-color: #fff; color: #333; }
+html[data-theme="dark"] { color-scheme: dark; background: #17191c; color: #efeff0; }
+html[data-theme="dark"] body, html[data-theme="dark"] body.glass { background: #17191c; color: #efeff0; }
+html[data-theme="dark"] .main, html[data-theme="dark"] body.glass .main { background: #17191c; }
+html[data-theme="dark"] body.glass .main { background: radial-gradient(circle at 20% 20%, #253345 0, transparent 40%), radial-gradient(circle at 85% 70%, #392f2d 0, transparent 42%), #1a1d21; }
+html[data-theme="dark"] .sidebar, html[data-theme="dark"] .topbar, html[data-theme="dark"] body.glass .topbar, html[data-theme="dark"] .tabbar, html[data-theme="dark"] body.glass .tabbar, html[data-theme="dark"] .category-panel, html[data-theme="dark"] .category-panel footer, html[data-theme="dark"] .settings-panel, html[data-theme="dark"] body.glass .settings-panel, html[data-theme="dark"] .settings-panel header, html[data-theme="dark"] body.glass .settings-panel header, html[data-theme="dark"] .history-panel, html[data-theme="dark"] .setup-screen { background: #1d2024; color: #ededed; border-color: #35383d; }
+html[data-theme="dark"] .note-card, html[data-theme="dark"] body.glass .note-card, html[data-theme="dark"] .todo-card, html[data-theme="dark"] body.glass .todo-card, html[data-theme="dark"] .search, html[data-theme="dark"] body.glass .search, html[data-theme="dark"] .toolbar > button, html[data-theme="dark"] body.glass .toolbar > button, html[data-theme="dark"] .category-list-item, html[data-theme="dark"] .category-create, html[data-theme="dark"] .settings-group, html[data-theme="dark"] body.glass .settings-group, html[data-theme="dark"] .setup-card, html[data-theme="dark"] .entry-dialog, html[data-theme="dark"] body.glass .entry-dialog, html[data-theme="dark"] .todo-sheet, html[data-theme="dark"] .reminder-sheet, html[data-theme="dark"] .more-menu, html[data-theme="dark"] .mindmap-more-menu, html[data-theme="dark"] .batch-bar, html[data-theme="dark"] .attachment-actions, html[data-theme="dark"] .background-strip { background: #2a2e33; color: #ededed; border-color: #42464d; }
+html[data-theme="dark"] .editor, html[data-theme="dark"] .editor[data-background], html[data-theme="dark"] body.glass .editor[data-background] { background: #202328; color: #eee; }
+html[data-theme="dark"] .note-card[data-background="warm"], html[data-theme="dark"] body.glass .note-card[data-background="warm"], html[data-theme="dark"] .editor[data-background="warm"], html[data-theme="dark"] body.glass .editor[data-background="warm"] { background: #393429; }
+html[data-theme="dark"] .note-card[data-background="rose"], html[data-theme="dark"] body.glass .note-card[data-background="rose"], html[data-theme="dark"] .editor[data-background="rose"], html[data-theme="dark"] body.glass .editor[data-background="rose"] { background: #392d30; }
+html[data-theme="dark"] .note-card[data-background="sage"], html[data-theme="dark"] body.glass .note-card[data-background="sage"], html[data-theme="dark"] .editor[data-background="sage"], html[data-theme="dark"] body.glass .editor[data-background="sage"] { background: #2b362e; }
+html[data-theme="dark"] .note-card[data-background="sky"], html[data-theme="dark"] body.glass .note-card[data-background="sky"], html[data-theme="dark"] .editor[data-background="sky"], html[data-theme="dark"] body.glass .editor[data-background="sky"] { background: #293541; }
+html[data-theme="dark"] .note-card[data-background="lavender"], html[data-theme="dark"] body.glass .note-card[data-background="lavender"], html[data-theme="dark"] .editor[data-background="lavender"], html[data-theme="dark"] body.glass .editor[data-background="lavender"] { background: #332f40; }
+html[data-theme="dark"] .editor-top, html[data-theme="dark"] body.glass .editor-top { background: transparent; }
+html[data-theme="dark"] .editor-toolbar, html[data-theme="dark"] body.glass .editor-toolbar, html[data-theme="dark"] #show-format, html[data-theme="dark"] #hide-format { background: #292d32; border-color: #42464d; box-shadow: none; }
+html[data-theme="dark"] #note-body, html[data-theme="dark"] .editor-meta input, html[data-theme="dark"] .editor-meta select, html[data-theme="dark"] .search input, html[data-theme="dark"] .setting-row, html[data-theme="dark"] .settings-link, html[data-theme="dark"] .settings-panel header button, html[data-theme="dark"] .editor-top button, html[data-theme="dark"] .editor-toolbar button, html[data-theme="dark"] .topbar button, html[data-theme="dark"] .category-panel header button, html[data-theme="dark"] .category-panel footer button, html[data-theme="dark"] .more-menu button, html[data-theme="dark"] .batch-bar button, html[data-theme="dark"] .attachment-actions button, html[data-theme="dark"] .history-panel header button { color: #ededed; }
+html[data-theme="dark"] .folder-chip, html[data-theme="dark"] body.glass .folder-chip, html[data-theme="dark"] .nav.active, html[data-theme="dark"] .folder-item.active, html[data-theme="dark"] .category-strip button.active, html[data-theme="dark"] .category-list-item.selected, html[data-theme="dark"] #note-body pre, html[data-theme="dark"] #note-body code, html[data-theme="dark"] #note-body .rich-table th { background: #393e45; color: #f1f1f1; }
+html[data-theme="dark"] .folder-chip svg { stroke: #ddd; }
+html[data-theme="dark"] .category-strip button, html[data-theme="dark"] .setting-row select, html[data-theme="dark"] .settings-group label:not(.setting-row) input, html[data-theme="dark"] .entry-dialog input, html[data-theme="dark"] .entry-dialog select { background: #363b42; border-color: #51565d; color: #eee; }
+html[data-theme="dark"] .note-card p, html[data-theme="dark"] #note-body blockquote, html[data-theme="dark"] .nav, html[data-theme="dark"] .folder-item { color: #b9bdc3; }
+html[data-theme="dark"] .primary { background: #f2b91e; color: #211b0e; }
+html[data-theme="dark"] .mindmap-dialog { background: #202328; color: #eee; }

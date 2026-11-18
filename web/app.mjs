@@ -1,3 +1,4 @@
+import { initializePreferences, locale, setLanguage, setTheme, t } from './preferences.mjs';
 import { bytesToUrl, decryptValue, deriveKey, downloadBlob, encryptValue, exchange, fetchInfo, historyForNote, makeOp, materialize, reencryptOps, uploadBlob, urlToBytes } from './core.mjs';
 import { allBlobs, allOps, getBlob, getMeta, openDb, pruneNote, putBlobs, putMeta, putOps, replaceVault } from './db.mjs';
 import { attachmentNode, tableNode, renderInlineMarkdown, renderMarkdown, serializeMarkdown } from './rich-editor.mjs';
@@ -83,10 +84,10 @@ function closeSettings() {
   if (history.state?.surgeSettings) history.back();
 }
 function niceDate(ms) {
-  return ms ? new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(ms) : '刚刚';
+  return ms ? new Intl.DateTimeFormat(locale(), { month: 'long', day: 'numeric' }).format(ms) : '刚刚';
 }
 function editDate(ms, length) {
-  return `${ms ? new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(ms) : '刚刚'}　|　${length} 字`;
+  return `${ms ? new Intl.DateTimeFormat(locale(), { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(ms) : '刚刚'}　|　${length} 字`;
 }
 function viewName() {
   return view === 'all' ? '笔记' : view === 'pinned' ? '置顶' : view === 'trash' ? '回收站' : view === '__uncategorized__' ? '未分类' : view;
@@ -114,8 +115,8 @@ function todoReminderText(when, rule = 'none', lunar = false, completed = false)
   const date = new Date(next || when);
   const today = new Date();
   const sameDay = date.toDateString() === today.toDateString();
-  const day = sameDay ? '今天' : new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date);
-  const time = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+  const day = sameDay ? '今天' : new Intl.DateTimeFormat(locale(), { month: 'numeric', day: 'numeric' }).format(date);
+  const time = new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
   const repeat = reminderRuleLabels[rule] ? ` · ${reminderRuleLabels[rule]}` : '';
   return `${day} ${time}${date.getTime() < Date.now() && !next ? ' 已过期' : ''}${repeat}${lunar ? ' · 农历' : ''} ◉`;
 }
@@ -134,7 +135,7 @@ function updateFolderSelect(folders) {
   select.replaceChildren(...['', ...folders, '__new__'].map(folder => {
     const option = document.createElement('option');
     option.value = folder;
-    option.textContent = folder === '__new__' ? '新建分类…' : folder || '未分类';
+    option.textContent = folder === '__new__' ? t('新建分类…') : folder || t('未分类');
     return option;
   }));
   select.value = value;
@@ -159,7 +160,7 @@ function renderCategoryPanel(folders) {
     mark.textContent = categorySelectMode ? (selectedCategories.has(entry.value) || (!custom && view === entry.value) ? '✓' : '') : (view === entry.value ? '✓' : '');
     const label = document.createElement('span');
     label.className = 'category-list-label';
-    label.textContent = entry.label;
+    label.textContent = custom ? entry.label : t(entry.label);
     const count = document.createElement('span');
     count.className = 'category-list-count';
     count.textContent = String(entry.count);
@@ -207,7 +208,7 @@ function render() {
     ['all', '全部'], ...folders.map(folder => [folder, folder]), ['__uncategorized__', '未分类']
   ].map(([value, label]) => {
     const button = document.createElement('button');
-    button.textContent = label;
+    button.textContent = ['all', '__uncategorized__'].includes(value) ? t(label) : label;
     button.classList.toggle('active', view === value);
     button.onclick = () => setView(value);
     return button;
@@ -217,8 +218,10 @@ function render() {
   document.querySelectorAll('.nav').forEach(button => button.classList.toggle('active', button.dataset.view === view));
   document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
   const name = tab === 'todos' ? '待办' : viewName();
-  $('view-title').textContent = name;
-  $('breadcrumbs').textContent = name;
+  for (const id of ['view-title', 'breadcrumbs']) {
+    $(id).toggleAttribute('data-user-content', tab === 'notes' && !['all', 'pinned', 'trash', '__uncategorized__'].includes(view));
+    $(id).textContent = name;
+  }
   $('trash-back').hidden = view !== 'trash';
   $('mobile-folders').hidden = tab === 'todos';
   $('search').placeholder = tab === 'todos' ? '搜索待办' : '搜索笔记';
@@ -259,16 +262,16 @@ function render() {
     if (selectMode) button.setAttribute('aria-pressed', String(selectedNotes.has(note.id)));
     if (selectMode) { const circle = document.createElement('span'); circle.className = 'select-circle'; circle.setAttribute('aria-hidden', 'true'); button.append(circle); }
     const title = document.createElement('h3');
-    title.textContent = note.title || (noteKind(note) === 'mindmap' ? '未命名思维笔记' : '未命名笔记');
+    title.textContent = note.title || t(noteKind(note) === 'mindmap' ? '未命名思维笔记' : '未命名笔记');
     const preview = document.createElement('p');
-    preview.textContent = noteKind(note) === 'mindmap' ? (mindmapPreview(note.body) || '思维笔记') : previewBody(note.body) || (note.body.includes('surge-blob:') ? '附件' : '空白笔记');
+    preview.textContent = noteKind(note) === 'mindmap' ? (mindmapPreview(note.body) || t('思维笔记')) : previewBody(note.body) || t(note.body.includes('surge-blob:') ? '附件' : '空白笔记');
     const footer = document.createElement('footer');
     const date = document.createElement('span');
     date.textContent = niceDate(note.updatedAt);
     const tag = document.createElement('span');
     tag.className = note.pinned ? 'pin' : '';
     if (note.pinned) { tag.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 3 8 0-1 6 3 3v2H6v-2l3-3-1-6Zm4 11v7"/></svg>'; tag.setAttribute('aria-label', '置顶'); }
-    else tag.textContent = noteKind(note) === 'mindmap' ? '思维笔记' : noteKind(note) === 'todo' ? '待办' : note.folder;
+    else tag.textContent = noteKind(note) === 'mindmap' ? t('思维笔记') : noteKind(note) === 'todo' ? t('待办') : note.folder;
     footer.append(date, tag);
     button.append(title, preview, footer);
     let hold, held = false, startX = 0, startY = 0;
@@ -284,7 +287,7 @@ function render() {
       if (held) { held = false; return; }
       if (selectMode) { selectedNotes.has(note.id) ? selectedNotes.delete(note.id) : selectedNotes.add(note.id); if (!selectedNotes.size) exitSelection(); render(); }
       else if (view === 'trash' && button.parentElement?.classList.contains('revealed')) button.parentElement.classList.remove('revealed');
-      else openEditor(note.id);
+      else openEditor(note.id, button);
     };
     if (view !== 'trash') return button;
     const wrapper = document.createElement('div');
@@ -506,7 +509,7 @@ function openMoveDialog(ids) {
   $('move-folder').replaceChildren(...options.map(folder => {
     const option = document.createElement('option');
     option.value = folder;
-    option.textContent = folder || '未分类';
+    option.textContent = folder || t('未分类');
     return option;
   }));
   $('move-folder').value = notes.get(moveTargets[0])?.folder || '';
@@ -714,7 +717,7 @@ function queueReminderSync() {
 }
 function renderReminderCalendar() {
   const year = reminderMonth.getFullYear(), month = reminderMonth.getMonth();
-  $('reminder-month-label').textContent = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long' }).format(reminderMonth);
+  $('reminder-month-label').textContent = new Intl.DateTimeFormat(locale(), { year: 'numeric', month: 'long' }).format(reminderMonth);
   const days = [];
   for (let index = 0; index < (new Date(year, month, 1).getDay() + 6) % 7; index++) days.push(document.createElement('span'));
   const count = new Date(year, month + 1, 0).getDate();
@@ -762,7 +765,7 @@ async function purgeNote(id) {
   render();
 }
 function createForTab() { if (tab === 'todos') openTodoEditor(); else createNote(); }
-function openEditor(id) {
+function openEditor(id, sourceCard = null) {
   current = id;
   const note = notes.get(id);
   if (!note) return;
@@ -788,6 +791,16 @@ function openEditor(id) {
   updateFolderSelect(allFolders());
   renderAttachments(id);
   updateEditorViewport();
+  if (sourceCard && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const from = sourceCard.getBoundingClientRect();
+    const to = $('editor').getBoundingClientRect();
+    if (from.width && from.height && to.width && to.height) {
+      $('editor').animate([
+        { transformOrigin: 'top left', transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`, borderRadius: '20px', opacity: .7 },
+        { transformOrigin: 'top left', transform: 'translate(0, 0) scale(1, 1)', borderRadius: '0', opacity: 1 }
+      ], { duration: 280, easing: 'cubic-bezier(.2, .75, .25, 1)' });
+    }
+  }
 }
 function updateEditorViewport() {
   const viewport = window.visualViewport;
@@ -1565,6 +1578,9 @@ $('connect').onclick = migrateLegacy;
 $('enable-sync').onclick = connectSync;
 $('disable-sync').onclick = disableSync;
 $('passphrase').onkeydown = event => { if (event.key === 'Enter') $('connect').click(); };
+initializePreferences();
+$('language-select').onchange = event => { setLanguage(event.target.value); render(); };
+$('theme-select').onchange = event => setTheme(event.target.value);
 $('glass-toggle').onchange = event => setGlass(event.target.checked);
 $('settings-back').onclick = closeSettings;
 $('open-trash').onclick = () => { closeSettings(); setView('trash'); };
@@ -1823,60 +1839,77 @@ let composingTitle = false, composingBody = false;
 function applyMarkdownShortcut() {
   const selection = window.getSelection();
   if (!selection?.rangeCount || !selection.isCollapsed) return false;
-  const anchor = selection.anchorNode;
-  if (!anchor || (anchor.nodeType === Node.TEXT_NODE && selection.anchorOffset < anchor.textContent.length)) return false;
+  const caret = selection.getRangeAt(0);
+  const anchor = caret.startContainer;
   const element = anchor.nodeType === Node.ELEMENT_NODE ? anchor : anchor.parentElement;
   const block = element?.closest('p, li');
   const body = $('note-body');
   if (!block || !body.contains(block)) return false;
-  const value = (block.textContent || '').replace(/\u00a0/g, ' ');
-  const placeCaret = target => {
-    const range = document.createRange();
-    range.selectNodeContents(target);
-    range.collapse(false);
-    focusRange(range);
-  };
-  if (block.tagName === 'LI' && /^\s*\[([ xX])\] $/.test(value) && !block.querySelector('input')) {
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.contentEditable = 'false';
-    checkbox.checked = /^\s*\[[xX]\]/.test(value);
-    block.replaceChildren(checkbox, document.createTextNode(' '));
-    placeCaret(block);
-    return true;
-  }
-  if (block.tagName !== 'P' || block.parentElement !== body || block.childNodes.length !== 1) return false;
-  const task = /^[-*] \[([ xX])\] $/.exec(value);
-  const list = /^([-*]|\d+\.) $/.exec(value);
-  if (task || list) {
-    const ordered = Boolean(list && /\d/.test(list[1]));
-    const wrapper = document.createElement(ordered ? 'ol' : 'ul');
-    if (ordered) wrapper.start = Number(list[1].slice(0, -1));
-    const item = document.createElement('li');
-    if (task) {
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.contentEditable = 'false';
-      checkbox.checked = task[1].toLowerCase() === 'x';
-      item.append(checkbox, document.createTextNode(' '));
+
+  // Map DOM positions to text offsets, treating soft line breaks as line boundaries.
+  const points = [];
+  let text = '';
+  const walk = node => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      for (let i = 0; i < node.length; i++) { points.push([node, i]); text += node.data[i]; }
+    } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR') {
+      const index = [...node.parentNode.childNodes].indexOf(node);
+      points.push([node.parentNode, index]); text += '\n';
+    } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'INPUT') {
+      node.childNodes.forEach(walk);
     }
-    wrapper.append(item);
-    block.replaceWith(wrapper);
-    placeCaret(item);
+  };
+  walk(block);
+  const before = document.createRange();
+  before.selectNodeContents(block);
+  before.setEnd(caret.startContainer, caret.startOffset);
+  const prefixFragment = before.cloneContents();
+  const prefixText = node => node.nodeType === Node.TEXT_NODE ? node.data : node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR' ? '\n' : [...node.childNodes].map(prefixText).join('');
+  const offset = prefixText(prefixFragment).length;
+  const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
+  const prefix = text.slice(lineStart, offset).replace(/\u00a0/g, ' ');
+  const list = /^([-*+]|\d+[.)]) $/.exec(prefix);
+  const task = /^\[([ xX])\] $/.exec(prefix);
+  const heading = /^(#{1,6}) $/.exec(prefix);
+  const quote = prefix === '> ';
+  if (block.tagName === 'LI' && task && lineStart === 0 && !block.querySelector('input')) {
+    const marker = document.createRange();
+    marker.setStart(...points[0]); marker.setEnd(caret.startContainer, caret.startOffset);
+    marker.deleteContents();
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox'; checkbox.contentEditable = 'false'; checkbox.checked = task[1].toLowerCase() === 'x';
+    block.prepend(checkbox, document.createTextNode(' '));
+    const next = document.createRange(); next.setStart(block.childNodes[1], 1); next.collapse(true); focusRange(next);
     return true;
   }
-  const heading = /^(#{1,6}) $/.exec(value);
-  if (heading || value === '> ') {
-    const replacement = document.createElement(heading ? `h${heading[1].length}` : 'blockquote');
-    const target = heading ? replacement : document.createElement('p');
-    if (!heading) replacement.append(target);
-    block.replaceWith(replacement);
-    placeCaret(target);
+  if (block.tagName === 'P' && block.parentElement === body && (list || heading || quote)) {
+    const markerStart = points[lineStart];
+    if (!markerStart) return false;
+    const lineEnd = text.indexOf('\n', offset);
+    const tail = document.createRange();
+    tail.setStart(caret.startContainer, caret.startOffset);
+    if (lineEnd >= 0) tail.setEnd(...points[lineEnd]); else tail.setEnd(block, block.childNodes.length);
+    const content = tail.extractContents();
+    const marker = document.createRange(); marker.setStart(...markerStart); marker.setEnd(caret.startContainer, caret.startOffset); marker.deleteContents();
+    // Split other soft lines into separate paragraphs around the transformed line.
+    const afterRange = document.createRange(); afterRange.setStart(caret.startContainer, caret.startOffset); afterRange.setEnd(block, block.childNodes.length);
+    const after = afterRange.extractContents();
+    if (after.firstChild?.nodeName === 'BR') after.firstChild.remove();
+    if (block.lastChild?.nodeName === 'BR') block.lastChild.remove();
+    const replacement = document.createElement(list ? (/^\d/.test(list[1]) ? 'ol' : 'ul') : heading ? `h${heading[1].length}` : 'blockquote');
+    if (list && replacement.tagName === 'OL') replacement.start = parseInt(list[1], 10);
+    const target = list ? document.createElement('li') : quote ? document.createElement('p') : replacement;
+    target.append(content);
+    if (target !== replacement) replacement.append(target);
+    block.after(replacement);
+    if (after.childNodes.length) { const following = document.createElement('p'); following.append(after); replacement.after(following); }
+    if (!block.textContent && !block.querySelector('br, img, input')) block.remove();
+    const next = document.createRange(); next.selectNodeContents(target); next.collapse(true); focusRange(next);
     return true;
   }
-  if (/(?:\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))$/.test(value)) {
-    renderInlineMarkdown(value, block);
-    placeCaret(block);
+  if (block.tagName === 'P' && block.parentElement === body && offset === text.length && lineStart === 0 && /(?:\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))$/.test(prefix)) {
+    renderInlineMarkdown(prefix, block);
+    focusIn(block);
     return true;
   }
   return false;

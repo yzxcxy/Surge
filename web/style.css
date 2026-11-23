@@ -145,17 +145,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .folder-chip { display: inline-flex; align-items: center; max-width: 230px; padding: 9px 12px; border-radius: 12px; background: #f0f0f0; }
 .folder-chip svg { width: 18px; height: 18px; flex: none; fill: none; stroke: #333; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .editor-meta select { min-width: 0; max-width: 185px; padding: 0 4px 0 8px; border: 0; appearance: none; background: transparent; color: #333; font-size: 13px; }
-.editor-meta input { display: block; width: 100%; margin-top: 25px; padding: 0; border: 0; outline: 0; background: none; color: #171717; font-size: 30px; font-weight: 650; line-height: 1.4; }
-.editor-meta input::placeholder { color: #b0b0b0; }
+.editor-meta textarea { display: block; width: 100%; margin-top: 25px; padding: 0; border: 0; outline: 0; background: none; color: #171717; font-size: 25px; font-weight: 650; line-height: 1.4; resize: none; overflow-y: auto; max-height: 35vh; font-family: inherit; overflow-wrap: anywhere; }
+.editor-meta textarea::placeholder { color: #b0b0b0; }
 #edit-date { margin-top: 17px; color: #aaa; font-size: 13px; }
 .editor-body-wrap { position: relative; display: flex; flex: 1; min-height: 0; width: min(860px, 100%); margin: 0 auto; }
 #create-mindmap-inline { position: absolute; z-index: 1; top: 25px; left: 180px; display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border: 0; border-radius: 13px; background: #fff9e9; color: #e4a900; font-size: 14px; }
 #create-mindmap-inline[hidden] { display: none; }
 #create-mindmap-inline svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #note-body { position: relative; flex: 1; min-height: 0; width: 100%; margin: 0; padding: 32px 34px 36px; overflow-y: auto; border: 0; outline: 0; background: none; color: #242424; font-size: 17px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
-#note-body:has(> p:only-child:empty)::before { content: attr(data-placeholder); position: absolute; top: 32px; left: 34px; color: #b0b0b0; pointer-events: none; }
+#note-body:has(> p:only-child:empty)::before, #note-body:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); position: absolute; top: 32px; left: 34px; color: #b0b0b0; pointer-events: none; }
 #note-body p { margin: 0 0 1.15em; min-height: 1.8em; }
 #note-body h1, #note-body h2, #note-body h3 { line-height: 1.4; margin: .6em 0 .5em; }
+#note-body h1 { font-size: 1.4em; }
+#note-body h2 { font-size: 1.25em; }
+#note-body h3 { font-size: 1.1em; }
 #note-body ul, #note-body ol { margin: 0 0 1.15em; padding-left: 1.4em; }
 #note-body li { padding-left: .15em; }
 #note-body li:has(> input[type=checkbox]) { list-style: none; margin-left: -1.4em; }
@@ -188,6 +191,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .editor-toolbar { display: flex; gap: 7px; flex: none; width: 100%; min-height: 65px; overflow-x: auto; align-items: center; padding: 7px max(20px, calc((100vw - 820px) / 2)) calc(7px + env(safe-area-inset-bottom)); border-top: 1px solid #ececec; background: #ffffffeb; scrollbar-width: none; }
 .editor-toolbar::-webkit-scrollbar { display: none; }
 .editor-toolbar button { display: grid; place-items: center; flex: none; width: 52px; height: 48px; padding: 8px; border: 0; border-radius: 12px; background: none; color: #323232; }
+#editor-toolbar { gap: 0; }
+#editor-toolbar button { flex: 1 0 40px; width: auto; }
+#editor-toolbar #show-format { position: static; margin-left: 0; box-shadow: none; }
 .editor-toolbar button svg { width: 27px; height: 27px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .editor-toolbar button circle:not(:first-child) { stroke: currentColor; }
 .editor-toolbar button:active { background: #fff5d6; color: #d59a00; }
@@ -474,13 +480,14 @@ body.glass .note-card[data-background="lavender"] { background: #f0ebf9ce; }
   .editor-meta { padding: 10px 26px 0; }
   .folder-chip { padding: 8px 12px; }
   .editor-meta select { font-size: 14px; }
-  .editor-meta input { margin-top: 20px; font-size: 29px; }
+  .editor-meta textarea { margin-top: 20px; font-size: 24px; }
   #edit-date { margin-top: 11px; }
   #note-body { padding: 24px 26px 26px; font-size: 18px; line-height: 1.9; }
-  #note-body:has(> p:only-child:empty)::before { top: 24px; left: 26px; }
+  #note-body:has(> p:only-child:empty)::before, #note-body:has(> p:only-child > br:only-child)::before { top: 24px; left: 26px; }
   #create-mindmap-inline { top: 17px; left: 150px; }
   .editor-toolbar { gap: 2px; min-height: 63px; padding: 7px 14px calc(7px + env(safe-area-inset-bottom)); }
   .editor-toolbar button { width: 44px; padding: 6px; }
+  #editor-toolbar { gap: 0; }
   .more-menu { top: 75px; right: 19px; }
   html.native-app .drawing-header { padding-top: 42px; min-height: 100px; }
   html.native-app .mindmap-dialog header { padding-top: 40px; height: 106px; }
@@ -520,7 +527,7 @@ html[data-theme="dark"] .note-card[data-background="sky"], html[data-theme="dark
 html[data-theme="dark"] .note-card[data-background="lavender"], html[data-theme="dark"] body.glass .note-card[data-background="lavender"], html[data-theme="dark"] .editor[data-background="lavender"], html[data-theme="dark"] body.glass .editor[data-background="lavender"] { background: #332f40; }
 html[data-theme="dark"] .editor-top, html[data-theme="dark"] body.glass .editor-top { background: transparent; }
 html[data-theme="dark"] .editor-toolbar, html[data-theme="dark"] body.glass .editor-toolbar, html[data-theme="dark"] #show-format, html[data-theme="dark"] #hide-format { background: #292d32; border-color: #42464d; box-shadow: none; }
-html[data-theme="dark"] #note-body, html[data-theme="dark"] .editor-meta input, html[data-theme="dark"] .editor-meta select, html[data-theme="dark"] .search input, html[data-theme="dark"] .setting-row, html[data-theme="dark"] .settings-link, html[data-theme="dark"] .settings-panel header button, html[data-theme="dark"] .editor-top button, html[data-theme="dark"] .editor-toolbar button, html[data-theme="dark"] .topbar button, html[data-theme="dark"] .category-panel header button, html[data-theme="dark"] .category-panel footer button, html[data-theme="dark"] .more-menu button, html[data-theme="dark"] .batch-bar button, html[data-theme="dark"] .attachment-actions button, html[data-theme="dark"] .history-panel header button { color: #ededed; }
+html[data-theme="dark"] #note-body, html[data-theme="dark"] .editor-meta textarea, html[data-theme="dark"] .editor-meta select, html[data-theme="dark"] .search input, html[data-theme="dark"] .setting-row, html[data-theme="dark"] .settings-link, html[data-theme="dark"] .settings-panel header button, html[data-theme="dark"] .editor-top button, html[data-theme="dark"] .editor-toolbar button, html[data-theme="dark"] .topbar button, html[data-theme="dark"] .category-panel header button, html[data-theme="dark"] .category-panel footer button, html[data-theme="dark"] .more-menu button, html[data-theme="dark"] .batch-bar button, html[data-theme="dark"] .attachment-actions button, html[data-theme="dark"] .history-panel header button { color: #ededed; }
 html[data-theme="dark"] .folder-chip, html[data-theme="dark"] body.glass .folder-chip, html[data-theme="dark"] .nav.active, html[data-theme="dark"] .folder-item.active, html[data-theme="dark"] .category-strip button.active, html[data-theme="dark"] .category-list-item.selected, html[data-theme="dark"] #note-body pre, html[data-theme="dark"] #note-body code, html[data-theme="dark"] #note-body .rich-table th { background: #393e45; color: #f1f1f1; }
 html[data-theme="dark"] .folder-chip svg { stroke: #ddd; }
 html[data-theme="dark"] .category-strip button, html[data-theme="dark"] .setting-row select, html[data-theme="dark"] .settings-group label:not(.setting-row) input, html[data-theme="dark"] .entry-dialog input, html[data-theme="dark"] .entry-dialog select { background: #363b42; border-color: #51565d; color: #eee; }

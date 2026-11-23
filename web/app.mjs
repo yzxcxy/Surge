@@ -782,6 +782,7 @@ function openEditor(id, sourceCard = null) {
   $('editor-toolbar').hidden = false;
   $('create-mindmap-inline').hidden = !(draftId === id && draftUntouched && !note.title && !note.body);
   $('note-title').value = note.title;
+  resizeNoteTitle();
   clearAttachmentUrls();
   renderMarkdown(note.body, $('note-body'));
   bodyRange = null;
@@ -1084,6 +1085,7 @@ function insertTask() {
   insertBlock(list);
 }
 function focusIn(node, atStart = false) {
+  if (!node.textContent && !node.querySelector('*')) node.replaceChildren(document.createElement('br'));
   const caret = document.createRange();
   caret.selectNodeContents(node);
   caret.collapse(atStart);
@@ -1918,13 +1920,22 @@ document.querySelectorAll('.nav').forEach(button => button.onclick = () => setVi
 document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => setTab(button.dataset.tab));
 $('add-folder').onclick = () => openFolderDialog();
 let composingTitle = false, composingBody = false;
+function resizeNoteTitle() {
+  const title = $('note-title');
+  title.style.height = 'auto';
+  title.style.height = title.scrollHeight + 'px';
+}
+$('note-title').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.isComposing) event.preventDefault();
+});
+
 function applyMarkdownShortcut() {
   const selection = window.getSelection();
   if (!selection?.rangeCount || !selection.isCollapsed) return false;
   const caret = selection.getRangeAt(0);
   const anchor = caret.startContainer;
   const element = anchor.nodeType === Node.ELEMENT_NODE ? anchor : anchor.parentElement;
-  const block = element?.closest('p, li');
+  const block = element?.closest('p, div, li');
   const body = $('note-body');
   if (!block || !body.contains(block)) return false;
 
@@ -1964,7 +1975,7 @@ function applyMarkdownShortcut() {
     const next = document.createRange(); next.setStart(block.childNodes[1], 1); next.collapse(true); focusRange(next);
     return true;
   }
-  if (block.tagName === 'P' && block.parentElement === body && (list || heading || quote)) {
+  if (block.matches('p, div') && block.parentElement === body && (list || heading || quote)) {
     const markerStart = points[lineStart];
     if (!markerStart) return false;
     const lineEnd = text.indexOf('\n', offset);
@@ -1986,10 +1997,10 @@ function applyMarkdownShortcut() {
     block.after(replacement);
     if (after.childNodes.length) { const following = document.createElement('p'); following.append(after); replacement.after(following); }
     if (!block.textContent && !block.querySelector('br, img, input')) block.remove();
-    const next = document.createRange(); next.selectNodeContents(target); next.collapse(true); focusRange(next);
+    focusIn(target, true);
     return true;
   }
-  if (block.tagName === 'P' && block.parentElement === body && offset === text.length && lineStart === 0 && /(?:\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))$/.test(prefix)) {
+  if (block.matches('p, div') && block.parentElement === body && offset === text.length && lineStart === 0 && /(?:\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))$/.test(prefix)) {
     renderInlineMarkdown(prefix, block);
     focusIn(block);
     return true;
@@ -2000,20 +2011,40 @@ $('note-title').addEventListener('compositionstart', () => { composingTitle = tr
 $('note-title').addEventListener('compositionend', event => { composingTitle = false; if (current) { if (draftId === current && event.target.value) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } changeNote(current, 'title', event.target.value); } });
 $('note-body').addEventListener('compositionstart', () => { composingBody = true; });
 $('note-body').addEventListener('compositionend', () => { composingBody = false; if (draftId === current && $('note-body').textContent.trim()) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } applyMarkdownShortcut(); saveEditorBody(); });
+function removeHeadingAtStart(event) {
+  if (composingBody || event.isComposing) return false;
+  const selection = window.getSelection();
+  const range = selection?.rangeCount && selection.isCollapsed ? selection.getRangeAt(0) : null;
+  const element = range && (range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement);
+  const heading = element?.closest('h1, h2, h3, h4, h5, h6');
+  if (heading?.parentElement !== $('note-body')) return false;
+  const before = document.createRange();
+  before.selectNodeContents(heading);
+  before.setEnd(range.startContainer, range.startOffset);
+  if (before.toString()) return false;
+  event.preventDefault();
+  const paragraph = document.createElement('p');
+  while (heading.firstChild) paragraph.append(heading.firstChild);
+  heading.replaceWith(paragraph);
+  focusIn(paragraph, true);
+  saveEditorBody();
+  return true;
+}
 $('note-body').addEventListener('keydown', event => {
+  if (event.key === 'Backspace' && removeHeadingAtStart(event)) return;
   if (event.key === 'Enter' && !event.shiftKey) handleStructuredEdit(event, 'enter');
   else if (event.key === 'Backspace') handleStructuredEdit(event, 'backspace');
 });
 $('note-body').addEventListener('beforeinput', event => {
   if (event.inputType === 'insertParagraph') handleStructuredEdit(event, 'enter');
-  else if (event.inputType === 'deleteContentBackward') handleStructuredEdit(event, 'backspace');
+  else if (event.inputType === 'deleteContentBackward' && !removeHeadingAtStart(event)) handleStructuredEdit(event, 'backspace');
 });
 document.addEventListener('selectionchange', () => {
   const selection = window.getSelection();
   if (selection.rangeCount && $('note-body').contains(selection.anchorNode)) bodyRange = selection.getRangeAt(0).cloneRange();
 });
 $('note-body').addEventListener('change', event => { if (event.target.matches('input[type="checkbox"]')) saveEditorBody(); });
-$('note-title').oninput = event => { if (current && !composingTitle) { if (draftId === current && event.target.value) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } changeNote(current, 'title', event.target.value); } };
+$('note-title').oninput = event => { if (!composingTitle && /[\r\n]/.test(event.target.value)) event.target.value = event.target.value.replace(/[\r\n]+/g, ' '); resizeNoteTitle(); if (current && !composingTitle) { if (draftId === current && event.target.value) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } changeNote(current, 'title', event.target.value); } };
 $('note-body').oninput = () => { if (current && !composingBody) { if (draftId === current && $('note-body').textContent.trim()) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } applyMarkdownShortcut(); saveEditorBody(); } };
 $('note-folder').onchange = event => {
   if (!current) return;

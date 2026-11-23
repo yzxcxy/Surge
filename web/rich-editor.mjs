@@ -215,7 +215,11 @@ export function renderMarkdown(source, root) {
     appendInline(paragraph, text.join('\n'));
     root.append(paragraph);
   }
-  if (!root.childNodes.length || root.lastElementChild?.matches('.rich-attachment')) root.append(document.createElement('p'));
+  if (!root.childNodes.length || root.lastElementChild?.matches('.rich-attachment')) {
+    const paragraph = document.createElement('p');
+    paragraph.append(document.createElement('br'));
+    root.append(paragraph);
+  }
 }
 
 function inlineMarkdown(node) {

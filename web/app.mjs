@@ -940,15 +940,17 @@ async function sync() {
   } finally { syncing = false; }
 }
 async function activateVault(candidateKey, ops) {
-  const state = await materialize(ops, candidateKey);
+  const [state, folders, storedClock, storedActor, storedCursor] = await Promise.all([
+    materialize(ops, candidateKey), getMeta(db, 'folders'), getMeta(db, 'clock'),
+    getMeta(db, 'actor'), getMeta(db, 'cursor')
+  ]);
   key = candidateKey;
   notes = state.notes;
-  const folders = await getMeta(db, 'folders');
   folderCatalog = folders ? await decryptValue(key, folders) : [];
-  clock = Math.max(state.maxClock, (await getMeta(db, 'clock')) || 0);
-  actor = await getMeta(db, 'actor');
+  clock = Math.max(state.maxClock, storedClock || 0);
+  actor = storedActor;
   if (!actor) { actor = crypto.randomUUID(); await putMeta(db, 'actor', actor); }
-  cursor = (await getMeta(db, 'cursor')) || 0;
+  cursor = storedCursor || 0;
   if (folderCatalog.length) {
     const previous = folderCatalog;
     folderCatalog = [];
@@ -971,8 +973,8 @@ async function bootstrap() {
   db = await openDb();
   setGlass(localStorage.getItem('surge-glass-default-v2') === '1' ? localStorage.getItem('surge-glass') !== '0' : true);
   localStorage.setItem('surge-glass-default-v2', '1');
-  const ops = await allOps(db);
-  let storedKey = await getMeta(db, 'deviceKey');
+  const [ops, deviceKey] = await Promise.all([allOps(db), getMeta(db, 'deviceKey')]);
+  let storedKey = deviceKey;
   if (!storedKey) {
     if (ops.length || ((await getMeta(db, 'salt')) && syncConfigured())) { showLegacy(); return; }
     storedKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);

@@ -59,15 +59,30 @@ export function wins(next, prior) {
 }
 export async function materialize(ops, key) {
   const notes = new Map();
+  const winners = new Map();
   let maxClock = 0;
+  // Pick the winning encrypted value for each field before decrypting. The
+  // complete operation log remains available for history and synchronization.
   for (const op of ops) {
     maxClock = Math.max(maxClock, op.clock);
     let note = notes.get(op.noteId);
-    if (!note) { note = { id: op.noteId, title: '', body: '', folder: '', pinned: false, deleted: false, purged: false, kind: 'note', reminderAt: 0, reminderRule: 'none', reminderLunar: false, background: 'paper', updatedAt: 0, stamps: {} }; notes.set(op.noteId, note); }
-    if (wins(op, note.stamps[op.field])) {
-      note[op.field] = await decryptValue(key, op.ciphertext);
-      note.stamps[op.field] = { clock: op.clock, actor: op.actor };
+    if (!note) {
+      note = { id: op.noteId, title: '', body: '', folder: '', pinned: false, deleted: false, purged: false, kind: 'note', reminderAt: 0, reminderRule: 'none', reminderLunar: false, background: 'paper', updatedAt: 0, stamps: {} };
+      notes.set(op.noteId, note);
+      winners.set(op.noteId, new Map());
     }
+    if (wins(op, note.stamps[op.field])) {
+      note.stamps[op.field] = { clock: op.clock, actor: op.actor };
+      winners.get(op.noteId).set(op.field, op);
+    }
+  }
+  const pending = [];
+  for (const [id, fields] of winners) for (const [field, op] of fields) pending.push({ note: notes.get(id), field, ciphertext: op.ciphertext });
+  // Bound parallel Web Crypto work so large vaults do not flood the device.
+  for (let i = 0; i < pending.length; i += 32) {
+    await Promise.all(pending.slice(i, i + 32).map(async item => {
+      item.note[item.field] = await decryptValue(key, item.ciphertext);
+    }));
   }
   for (const note of notes.values()) if (note.purged) { note.title = ''; note.body = ''; }
   return { notes, maxClock };

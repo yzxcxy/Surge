@@ -1,4 +1,4 @@
-const CACHE = 'surge-v23';
+const CACHE = 'surge-v25';
 const ASSETS = ['/', '/index.html', '/style.css', '/app.mjs', '/preferences.mjs', '/core.mjs', '/db.mjs', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest', '/rich-editor.mjs', '/updates.mjs', '/todo-reminders.mjs'];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim())));

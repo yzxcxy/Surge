@@ -142,9 +142,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .editor-top svg, .mobile-actions svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .editor-top circle { fill: currentColor; stroke: none; }
 .editor-meta { width: min(860px, 100%); margin: 0 auto; padding: 22px 34px 0; }
-.folder-chip { display: inline-flex; align-items: center; max-width: 230px; padding: 9px 12px; border-radius: 12px; background: #f0f0f0; }
+.folder-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 230px; padding: 9px 12px; border: 0; border-radius: 12px; background: #f0f0f0; color: #333; font-size: 13px; }
+.folder-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-chip svg.folder-chevron { width: 14px; height: 14px; }
 .folder-chip svg { width: 18px; height: 18px; flex: none; fill: none; stroke: #333; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
-.editor-meta select { min-width: 0; max-width: 185px; padding: 0 4px 0 8px; border: 0; appearance: none; background: transparent; color: #333; font-size: 13px; }
 .editor-meta textarea { display: block; width: 100%; margin-top: 25px; padding: 0; border: 0; outline: 0; background: none; color: #171717; font-size: 25px; font-weight: 650; line-height: 1.4; resize: none; overflow-y: auto; max-height: 35vh; font-family: inherit; overflow-wrap: anywhere; }
 .editor-meta textarea::placeholder { color: #b0b0b0; }
 #edit-date { margin-top: 17px; color: #aaa; font-size: 13px; }
@@ -479,7 +480,7 @@ body.glass .note-card[data-background="lavender"] { background: #f0ebf9ce; }
   .editor-top-actions { gap: 20px; }
   .editor-meta { padding: 10px 26px 0; }
   .folder-chip { padding: 8px 12px; }
-  .editor-meta select { font-size: 14px; }
+  .folder-chip { font-size: 14px; }
   .editor-meta textarea { margin-top: 20px; font-size: 24px; }
   #edit-date { margin-top: 11px; }
   #note-body { padding: 24px 26px 26px; font-size: 18px; line-height: 1.9; }
@@ -527,7 +528,7 @@ html[data-theme="dark"] .note-card[data-background="sky"], html[data-theme="dark
 html[data-theme="dark"] .note-card[data-background="lavender"], html[data-theme="dark"] body.glass .note-card[data-background="lavender"], html[data-theme="dark"] .editor[data-background="lavender"], html[data-theme="dark"] body.glass .editor[data-background="lavender"] { background: #332f40; }
 html[data-theme="dark"] .editor-top, html[data-theme="dark"] body.glass .editor-top { background: transparent; }
 html[data-theme="dark"] .editor-toolbar, html[data-theme="dark"] body.glass .editor-toolbar, html[data-theme="dark"] #show-format, html[data-theme="dark"] #hide-format { background: #292d32; border-color: #42464d; box-shadow: none; }
-html[data-theme="dark"] #note-body, html[data-theme="dark"] .editor-meta textarea, html[data-theme="dark"] .editor-meta select, html[data-theme="dark"] .search input, html[data-theme="dark"] .setting-row, html[data-theme="dark"] .settings-link, html[data-theme="dark"] .settings-panel header button, html[data-theme="dark"] .editor-top button, html[data-theme="dark"] .editor-toolbar button, html[data-theme="dark"] .topbar button, html[data-theme="dark"] .category-panel header button, html[data-theme="dark"] .category-panel footer button, html[data-theme="dark"] .more-menu button, html[data-theme="dark"] .batch-bar button, html[data-theme="dark"] .attachment-actions button, html[data-theme="dark"] .history-panel header button { color: #ededed; }
+html[data-theme="dark"] #note-body, html[data-theme="dark"] .editor-meta textarea, html[data-theme="dark"] .folder-chip, html[data-theme="dark"] .search input, html[data-theme="dark"] .setting-row, html[data-theme="dark"] .settings-link, html[data-theme="dark"] .settings-panel header button, html[data-theme="dark"] .editor-top button, html[data-theme="dark"] .editor-toolbar button, html[data-theme="dark"] .topbar button, html[data-theme="dark"] .category-panel header button, html[data-theme="dark"] .category-panel footer button, html[data-theme="dark"] .more-menu button, html[data-theme="dark"] .batch-bar button, html[data-theme="dark"] .attachment-actions button, html[data-theme="dark"] .history-panel header button { color: #ededed; }
 html[data-theme="dark"] .folder-chip, html[data-theme="dark"] body.glass .folder-chip, html[data-theme="dark"] .nav.active, html[data-theme="dark"] .folder-item.active, html[data-theme="dark"] .category-strip button.active, html[data-theme="dark"] .category-list-item.selected, html[data-theme="dark"] #note-body pre, html[data-theme="dark"] #note-body code, html[data-theme="dark"] #note-body .rich-table th { background: #393e45; color: #f1f1f1; }
 html[data-theme="dark"] .folder-chip svg { stroke: #ddd; }
 html[data-theme="dark"] .category-strip button, html[data-theme="dark"] .setting-row select, html[data-theme="dark"] .settings-group label:not(.setting-row) input, html[data-theme="dark"] .entry-dialog input, html[data-theme="dark"] .entry-dialog select { background: #363b42; border-color: #51565d; color: #eee; }
@@ -555,6 +556,8 @@ html[data-theme="dark"] .mindmap-dialog { background: #202328; color: #eee; }
 .preference-sheet h2 { margin: 0; font-size: 19px; font-weight: 650; }
 .preference-sheet header button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: #ededee; color: #777; font-size: 23px; line-height: 1; }
 .preference-options { display: grid; gap: 6px; }
+.folder-options { max-height: min(50dvh, 380px); overflow-y: auto; overscroll-behavior: contain; }
+.preference-option.folder-create { margin-top: 6px; color: #d99a00; }
 .preference-option { display: flex; align-items: center; justify-content: space-between; min-height: 53px; width: 100%; padding: 0 15px; border: 0; border-radius: 14px; background: transparent; color: inherit; text-align: left; font-size: 15px; -webkit-tap-highlight-color: transparent; }
 .preference-option[aria-checked="true"] { background: #fff4d5; font-weight: 600; }
 .preference-option:active { background: #efeff0; }

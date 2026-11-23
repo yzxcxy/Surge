@@ -45,6 +45,17 @@ public class EditorInstrumentedTest {
             awaitJs("typeof document.querySelector('#new-note')?.onclick === 'function' && !document.querySelector('#new-note').hidden");
             js("document.querySelector('#new-note').click()");
             awaitJs("!document.querySelector('#editor').hidden && document.querySelector('#note-title').clientWidth > 0");
+            js("document.querySelector('#note-folder').click()");
+            awaitJs("document.querySelector('#note-folder-dialog').open");
+            assertEquals("true", js("document.querySelector('#note-folder-options [aria-checked=true]')?.textContent.includes('未分类')"));
+            js("document.querySelector('#note-folder-create').click()");
+            awaitJs("document.querySelector('#folder-dialog').open && !document.querySelector('#note-folder-dialog').open");
+            String folder = "Android category " + System.currentTimeMillis();
+            js("(()=>{document.querySelector('#folder-name').value='" + folder + "'; document.querySelector('#folder-dialog form').requestSubmit()})()");
+            awaitJs("!document.querySelector('#folder-dialog').open && document.querySelector('#note-folder-label').textContent==='" + folder + "'");
+            js("document.querySelector('#note-folder').click()");
+            awaitJs("document.querySelector('#note-folder-options [aria-checked=true]')?.textContent.includes('" + folder + "')");
+            js("document.querySelector('#note-folder-close').click()");
             js("(()=>{let t=document.querySelector('#note-title'); t.value='Long title '.repeat(18); t.dispatchEvent(new Event('input',{bubbles:true}));})()");
             assertEquals("true", js("(()=>{let t=document.querySelector('#note-title'); return t.scrollHeight > parseFloat(getComputedStyle(t).lineHeight)*1.5})()"));
             assertEquals("true", js("(()=>{let t=document.querySelector('#editor-toolbar'), b=[...t.querySelectorAll('button')]; let r=t.getBoundingClientRect(); return b.length===7 && b[0].getBoundingClientRect().left >= r.left && b[6].getBoundingClientRect().right <= r.right && Math.abs(b[0].getBoundingClientRect().width-b[6].getBoundingClientRect().width)<1})()"));
@@ -78,4 +89,26 @@ public class EditorInstrumentedTest {
             awaitJs("!document.querySelector('#note-body h3') && [...document.querySelectorAll('#note-body p')].some(p=>p.textContent==='heading')");
         }
     }
+    @Test public void noteTransitionCanBeInterrupted() throws Exception {
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            scenario.onActivity(a -> { activity = a; web = a.getBridge().getWebView(); });
+            awaitJs("typeof document.querySelector('#new-note')?.onclick === 'function'");
+            js("document.querySelector('#new-note').click()");
+            awaitJs("!document.querySelector('#editor').hidden && document.querySelector('#note-title').clientWidth > 0");
+            js("(()=>{let t=document.querySelector('#note-title'); t.value='Animation test'; t.dispatchEvent(new Event('input',{bubbles:true}))})()");
+            awaitJs("[...document.querySelectorAll('.note-card h3')].some(n=>n.textContent==='Animation test')");
+            js("document.querySelector('#back').click()");
+            awaitJs("document.querySelector('#editor').hidden");
+            js("[...document.querySelectorAll('.note-card')].find(n=>n.querySelector('h3')?.textContent==='Animation test').click()");
+            awaitJs("!document.querySelector('#editor').hidden");
+            assertEquals("true", js("(()=>{let a=document.querySelector('#editor').getAnimations({subtree:true});return a.length===1 && a[0].effect.getKeyframes().every(k=>!k.clipPath)})()"));
+            js("document.querySelector('#back').click()");
+            awaitJs("document.querySelector('#editor').hidden");
+            js("[...document.querySelectorAll('.note-card')].find(n=>n.querySelector('h3')?.textContent==='Animation test').click()");
+            awaitJs("!document.querySelector('#editor').hidden");
+            awaitJs("document.querySelector('#editor').getAnimations({subtree:true}).length===0");
+            assertEquals("true", js("document.querySelector('#note-title').value==='Animation test'"));
+        }
+    }
+
 }

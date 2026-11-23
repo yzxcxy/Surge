@@ -131,16 +131,37 @@ function allFolders() {
     ...[...notes.values()].filter(note => !note.deleted && !note.purged && !isFolderRecord(note) && note.folder).map(note => note.folder)
   ])].sort((a, b) => Number(categoryPinned(b)) - Number(categoryPinned(a)) || a.localeCompare(b, 'zh-CN'));
 }
-function updateFolderSelect(folders) {
-  const select = $('note-folder');
+function updateFolderSelect() {
   const value = current ? notes.get(current)?.folder || '' : '';
-  select.replaceChildren(...['', ...folders, '__new__'].map(folder => {
-    const option = document.createElement('option');
-    option.value = folder;
-    option.textContent = folder === '__new__' ? t('新建分类…') : folder || t('未分类');
-    return option;
+  $('note-folder-label').textContent = value || t('未分类');
+}
+function openNoteFolderDialog() {
+  if (!current) return;
+  const id = current;
+  const selected = notes.get(id)?.folder || '';
+  const dialog = $('note-folder-dialog');
+  $('note-folder-dialog-title').textContent = t('分类');
+  $('note-folder-create').textContent = '＋ ' + t('新建分类');
+  $('note-folder-options').replaceChildren(...['', ...allFolders()].map(folder => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'preference-option';
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', String(folder === selected));
+    const label = document.createElement('span');
+    label.textContent = folder || t('未分类');
+    const check = document.createElement('span');
+    check.className = 'preference-check';
+    check.setAttribute('aria-hidden', 'true');
+    check.textContent = folder === selected ? '✓' : '';
+    button.append(label, check);
+    button.onclick = () => {
+      dialog.close();
+      if (current === id && folder !== selected) changeNote(id, 'folder', folder);
+    };
+    return button;
   }));
-  select.value = value;
+  dialog.showModal();
 }
 function renderCategoryPanel(folders) {
   const active = [...notes.values()].filter(note => note.id !== draftId && !note.deleted && !note.purged && !isFolderRecord(note));
@@ -792,16 +813,20 @@ function openEditor(id, sourceCard = null) {
   $('restore-note').hidden = !note.deleted;
   $('more-menu').hidden = true;
   updateFolderSelect(allFolders());
-  renderAttachments(id);
   updateEditorViewport();
   if (sourceCard && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const card = sourceCard.getBoundingClientRect();
     const box = $('editor').getBoundingClientRect();
     if (card.width && card.height && box.width && box.height) {
       const animation = transitionEditor(card, box, false);
-      animation.finished.then(() => cancelEditorTransition(), () => {});
+      animation.finished.then(() => {
+        cancelEditorTransition();
+        if (current === id) renderAttachments(id);
+      }, () => {});
+      return;
     }
   }
+  renderAttachments(id);
 }
 function cancelEditorTransition() {
   for (const animation of editorTransition) animation.cancel();
@@ -810,30 +835,18 @@ function cancelEditorTransition() {
 function transitionEditor(card, box, closing) {
   cancelEditorTransition();
   const editor = $('editor');
-  const top = Math.max(0, card.top - box.top);
-  const left = Math.max(0, card.left - box.left);
-  const right = Math.max(0, box.right - card.right);
-  const bottom = Math.max(0, box.bottom - card.bottom);
-  const collapsed = `inset(${top}px ${right}px ${bottom}px ${left}px round 20px)`;
-  const expanded = 'inset(0px 0px 0px 0px round 0px)';
-  const duration = closing ? 450 : 520;
-  const easing = closing ? 'cubic-bezier(.4, 0, .2, 1)' : 'cubic-bezier(.25, .1, .25, 1)';
-  const shell = editor.animate(closing
-    ? [{ clipPath: expanded }, { clipPath: collapsed }]
-    : [{ clipPath: collapsed }, { clipPath: expanded }],
-  { duration, easing, fill: 'forwards' });
+  // A small movement towards the card preserves the spatial cue without
+  // clipping and repainting the whole editor on every animation frame.
+  const x = Math.max(-32, Math.min(32, (card.left + card.width / 2 - box.left - box.width / 2) * .08));
+  const y = Math.max(-32, Math.min(32, (card.top + card.height / 2 - box.top - box.height / 2) * .08));
+  const resting = { transform: 'translate3d(0, 0, 0) scale(1)', opacity: 1 };
+  const departing = { transform: `translate3d(${x}px, ${y}px, 0) scale(.985)`, opacity: 0 };
+  const shell = editor.animate(closing ? [resting, departing] : [departing, resting], {
+    duration: closing ? 200 : 240,
+    easing: closing ? 'ease-in' : 'cubic-bezier(.2, .8, .2, 1)',
+    fill: 'forwards'
+  });
   editorTransition.push(shell);
-  // Move the editor content towards the card while its surrounding surface clips
-  // to the card bounds. There is no extra overlay that can flash over the note.
-  const x = card.left - box.left;
-  const y = card.top - box.top;
-  for (const child of editor.children) {
-    const animation = child.animate(closing
-      ? [{ transform: 'translate(0, 0) scale(1)', opacity: 1 }, { transform: `translate(${x}px, ${y}px) scale(.88)`, opacity: 0, offset: .9 }, { transform: `translate(${x}px, ${y}px) scale(.88)`, opacity: 0 }]
-      : [{ transform: `translate(${x}px, ${y}px) scale(.88)`, opacity: 0 }, { transform: `translate(${x}px, ${y}px) scale(.88)`, opacity: 0, offset: .1 }, { transform: 'translate(0, 0) scale(1)', opacity: 1 }],
-    { duration, easing, fill: 'forwards', composite: 'replace' });
-    editorTransition.push(animation);
-  }
   return shell;
 }
 function closeEditor() {
@@ -2046,10 +2059,13 @@ document.addEventListener('selectionchange', () => {
 $('note-body').addEventListener('change', event => { if (event.target.matches('input[type="checkbox"]')) saveEditorBody(); });
 $('note-title').oninput = event => { if (!composingTitle && /[\r\n]/.test(event.target.value)) event.target.value = event.target.value.replace(/[\r\n]+/g, ' '); resizeNoteTitle(); if (current && !composingTitle) { if (draftId === current && event.target.value) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } changeNote(current, 'title', event.target.value); } };
 $('note-body').oninput = () => { if (current && !composingBody) { if (draftId === current && $('note-body').textContent.trim()) { draftUntouched = false; $('create-mindmap-inline').hidden = true; } applyMarkdownShortcut(); saveEditorBody(); } };
-$('note-folder').onchange = event => {
-  if (!current) return;
-  if (event.target.value === '__new__') { const id = current; render(); openFolderDialog('create', '', id); }
-  else changeNote(current, 'folder', event.target.value);
+$('note-folder').onclick = openNoteFolderDialog;
+$('note-folder-close').onclick = () => $('note-folder-dialog').close();
+$('note-folder-dialog').onclick = event => { if (event.target === $('note-folder-dialog')) $('note-folder-dialog').close(); };
+$('note-folder-create').onclick = () => {
+  const id = current;
+  $('note-folder-dialog').close();
+  if (id) openFolderDialog('create', '', id);
 };
 $('pin-note').onclick = async () => { const id = current; await changeNote(id, 'pinned', !notes.get(id).pinned); openEditor(id); };
 $('delete-note').onclick = async () => { const id = current; await changeNote(id, 'deleted', true); $('editor').hidden = true; current = null; };

@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.7.1';
+export const APP_VERSION = '1.7.2';
 export const DEFAULT_REPOSITORY = 'yzxcxy/Surge';
 
 export function parseRepository(value) {
